@@ -3,10 +3,10 @@ import asyncio
 import re
 import random
 from telethon.sync import TelegramClient, events
-from telethon.tl.functions.messages import SetTypingRequest # Import the direct Request
-from telethon.tl.types import SendMessageTypingAction # Still needed for action type
+from telethon.tl.functions.messages import SetTypingRequest
+from telethon.tl.types import SendMessageTypingAction
 from telethon.sessions import StringSession
-from pymongo import MongoClient
+from pymongo import MongoClient # PyMongo is synchronous by default
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 
@@ -65,7 +65,8 @@ async def manage_db_size():
     while True:
         await asyncio.sleep(3600)
         try:
-            total_messages = await messages_collection.count_documents({})
+            # `await` removed from PyMongo operations
+            total_messages = messages_collection.count_documents({}) 
             print(f"Current DB size: {total_messages} messages.")
 
             if total_messages >= FULL_THRESHOLD:
@@ -76,6 +77,7 @@ async def manage_db_size():
                 delete_ids = [msg['_id'] for msg in oldest_messages_cursor]
 
                 if delete_ids:
+                    # `await` removed from PyMongo operations
                     delete_result = messages_collection.delete_many({"_id": {"$in": delete_ids}})
                     print(f"Deleted {delete_result.deleted_count} old messages successfully.")
                 else:
@@ -103,9 +105,7 @@ async def generate_and_send_group_reply(event):
 
     # --- Typing status dikhana aur 0.5 second ka delay ---
     await event.mark_read()
-    # `SetTypingRequest` का सीधे उपयोग करें `client.invoke` के साथ
     try:
-        # Get peer from chat_id
         input_peer = await userbot.get_input_entity(chat_id)
         await userbot(SetTypingRequest(peer=input_peer, action=SendMessageTypingAction()))
         await asyncio.sleep(0.5) # Minimum 0.5 second ka delay for typing
@@ -129,7 +129,8 @@ async def generate_and_send_group_reply(event):
     else:
         sticker_to_store_id = None
 
-    await messages_collection.insert_one({
+    # `await` removed from PyMongo insert_one
+    messages_collection.insert_one({
         'chat_id': chat_id,
         'sender_id': sender.id,
         'message': incoming_message,
@@ -149,6 +150,7 @@ async def generate_and_send_group_reply(event):
         "original_message": {"$regex": f"({'|'.join(re.escape(k) for k in keywords if k)})", "$options": "i"} 
     }
     
+    # `await` removed from PyMongo find_one
     past_bot_reply = messages_collection.find_one(search_query, sort=[("timestamp", -1)])
 
     if past_bot_reply and 'reply_text' in past_bot_reply:
@@ -212,7 +214,8 @@ async def generate_and_send_group_reply(event):
             print(f"Replied with sticker in {chat_id}: '{sticker_to_send}'")
 
         if sent_message or sticker_to_send:
-            await messages_collection.insert_one({
+            # `await` removed from PyMongo insert_one
+            messages_collection.insert_one({
                 'chat_id': chat_id,
                 'original_message_id': message_id,
                 'reply_text': final_reply_text,
@@ -240,7 +243,6 @@ async def handle_private_message(event):
     print(f"Received private message from {sender.id}: {event.raw_text}")
     
     await event.mark_read()
-    # `SetTypingRequest` का सीधे उपयोग करें `client.invoke` के साथ
     try:
         input_peer = await userbot.get_input_entity(event.chat_id)
         await userbot(SetTypingRequest(peer=input_peer, action=SendMessageTypingAction()))
@@ -258,7 +260,33 @@ async def main():
     await userbot.start()
     print("Userbot started successfully!")
 
-    asyncio.create_task(manage_db_size())
+    # Mongo DB operations are synchronous, so we need to run them in a separate thread
+    # or use asyncio.to_thread if we want to run them in an async context without blocking.
+    # For a simple bot, this might be fine, but for heavy load, consider `motor` for async PyMongo.
+    
+    # We will wrap synchronous MongoDB calls in a ThreadPoolExecutor for `manage_db_size`
+    # if it becomes a blocking issue. For now, keep it simple.
+    
+    # As manage_db_size() now uses synchronous PyMongo methods, we need to adapt it.
+    # The `await messages_collection.count_documents({})` line was the issue.
+    # Instead of making `manage_db_size` fully asynchronous with `motor`,
+    # we'll use `asyncio.to_thread` for the synchronous PyMongo operations
+    # inside the `manage_db_size` function, to keep the main event loop non-blocking.
+
+    # Re-evaluating manage_db_size(): It's better to keep it synchronous inside
+    # a separate thread or use `motor` if you want it truly async.
+    # For simplicity, if the problem is just `InsertOneResult`, removing `await` is enough.
+    # However, `count_documents` and `delete_many` also need `await` removed.
+
+    # Let's rewrite `manage_db_size` to correctly handle synchronous PyMongo methods
+    # within an asynchronous task, using `loop.run_in_executor` or `asyncio.to_thread`.
+    # This is slightly more advanced, but necessary for truly non-blocking DB ops in an async app.
+
+    # For now, let's just remove the `await` from the `manage_db_size` function calls as well.
+    # If the bot is not under heavy load, blocking the event loop briefly for DB ops is acceptable.
+    # If it causes issues later, `motor` or `to_thread` will be necessary.
+    
+    asyncio.create_task(manage_db_size()) # This task will now run, but its internal DB ops are blocking
     
     print("Userbot is running and listening for messages.")
     await userbot.run_until_disconnected()
