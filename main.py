@@ -109,8 +109,8 @@ async def generate_and_send_group_reply(event):
         return
 
     # --- Typing status dikhana aur 0.5 second ka delay ---
-    # `send_read_acknowledge` ko message ID ke saath theek kiya gaya hai
-    await userbot.send_read_acknowledge(chat_id, message_id)
+    # `send_read_acknowledge` ki jagah `iter_read_history` ka istemal
+    await userbot.iter_read_history(chat_id, max_id=message_id)
     await userbot.send_action(chat_id, SendMessageTypingAction())
     await asyncio.sleep(0.5) # Minimum 0.5 second ka delay
 
@@ -220,11 +220,8 @@ async def generate_and_send_group_reply(event):
             print(f"Replied with text in {chat_id}: '{final_reply_text}'")
 
         if sticker_to_send:
-            # Agar text bhi bheja hai aur sticker bhi, toh sticker alag se bhej de
-            if not final_reply_text.strip(): # Agar sirf sticker bhejna hai
-                 await userbot.send_file(chat_id, sticker_to_send, reply_to=message_id)
-            else: # Agar text bhi hai, toh sticker alag message mein
-                 await userbot.send_file(chat_id, sticker_to_id=sticker_to_send) # reply_to=message_id remove kiya for distinct message
+            # Sticker always sent as a new message, not a reply to itself.
+            await userbot.send_file(chat_id, sticker_to_send)
             print(f"Replied with sticker in {chat_id}: '{sticker_to_send}'")
 
         # Apne reply ko MongoDB mein store karein (conversation pair ke roop mein)
@@ -257,8 +254,8 @@ async def handle_private_message(event):
     print(f"Received private message from {sender.id}: {event.raw_text}")
     
     # Typing status
-    # `send_read_acknowledge` ko message ID ke saath theek kiya gaya hai
-    await userbot.send_read_acknowledge(event.chat_id, event.id)
+    # `send_read_acknowledge` ki jagah `iter_read_history` ka istemal
+    await userbot.iter_read_history(event.chat_id, max_id=event.id)
     await userbot.send_action(event.chat_id, SendMessageTypingAction())
     await asyncio.sleep(0.5) # Delay
 
