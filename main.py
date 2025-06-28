@@ -1,14 +1,13 @@
-# main.py
-
 import os
 import asyncio
 import re
 import random
 from telethon.sync import TelegramClient, events
 from telethon.tl.types import SendMessageTypingAction
+from telethon.sessions import StringSession # Yeh line zaroori hai StringSession ke liye
 from pymongo import MongoClient
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify # Monitoring ke liye Flask
+from flask import Flask, request, jsonify
 
 # --- Configuration (Koyeb Environment Variables se aayenge) ---
 API_ID = int(os.environ.get('API_ID'))
@@ -17,7 +16,7 @@ STRING_SESSION = os.environ.get('STRING_SESSION')
 MONGO_URI = os.environ.get('MONGO_URI')
 
 # --- Private Message Reply Content (Girl-like, Fun & Engaging) ---
-# Yahan humne ladkiyon jaise expressions aur emojis add kiye hain.
+# Ye replies random choose honge jab koi private message karega.
 PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE = [
     "Hii! 🤗 Mujhe private mein message kiya? Kitne cute ho! 🥰 Agar tum mujhe apne group mein add karoge na, toh main wahan itni masti karungi ki sabki hansi nahi rukegi! Aur haan, hamare movie group ko bhi join kar lena - @istreamX, updates ke liye @asbhai_bsr aur chat ke liye @aschat_group. Dekho, sab list mein hain! 😉",
     "Helloo! 💖 Surprise! Tumne mujhe private message kiya. Kya chal raha hai? Suno na, agar tum mujhe apne group mein shamil karte ho, toh wahan ki chat ko main super fun bana dungi! Promise! ✨ Aur haan, yeh rahe hamare special groups: Movie group - @istreamX, Updates - @asbhai_bsr, Chat group - @aschat_group. Jaldi se aa jao! 😉",
@@ -26,12 +25,11 @@ PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE = [
     "Haaaiii! Meri pyaari friend ne mujhe message kiya! 🥰 Agar tum mujhe apne group mein add karte ho, toh main wahan itni mazedar baatein karungi ki tumko aur tumhare friends ko bahut mazaa aayega. Koi bore nahi hoga, I promise! 😉 Aur yeh bhi join karna mat bhoolna: @istreamX, @asbhai_bsr, @aschat_group. Milte hain group mein! 👋"
 ]
 
-
 # --- MongoDB Setup ---
 try:
     client_mongo = MongoClient(MONGO_URI)
-    db = client_mongo['telegram_userbot_db'] # Database ka naam
-    messages_collection = db['group_messages'] # Group messages store karne ke liye
+    db = client_mongo['telegram_userbot_db'] # Aap database ka naam badal sakte hain
+    messages_collection = db['group_messages'] # Collection jahan group messages store honge
     print("MongoDB connection successful.")
 except Exception as e:
     print(f"MongoDB connection failed: {e}")
@@ -39,7 +37,8 @@ except Exception as e:
     exit()
 
 # --- Telethon Client Setup ---
-userbot = TelegramClient(STRING_SESSION, API_ID, API_HASH)
+# Yahan StringSession ka istemal kiya gaya hai takki Koyeb par file system error na aaye.
+userbot = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 # --- Global variable to store last message ID per chat to avoid double replies ---
 last_processed_message_id = {}
@@ -63,11 +62,11 @@ def health_check():
 
 # --- MongoDB Data Management Task ---
 async def manage_db_size():
-    FULL_THRESHOLD = 10000 # Example: Max 10,000 messages
+    FULL_THRESHOLD = 10000 # Example: Max 10,000 messages. Aap ise adjust kar sakte hain.
     DELETE_PERCENTAGE = 0.50 # Purane 50% messages delete karein
 
     while True:
-        await asyncio.sleep(3600) # Har ghante check karega (1 hour)
+        await asyncio.sleep(3600) # Har ghante check karega (1 hour = 3600 seconds)
         try:
             total_messages = await messages_collection.count_documents({})
             print(f"Current DB size: {total_messages} messages.")
@@ -78,7 +77,7 @@ async def manage_db_size():
 
                 # Sabse purane documents ko dhoondein aur delete karein
                 oldest_messages_cursor = messages_collection.find().sort("timestamp", 1).limit(num_to_delete)
-                delete_ids = [str(msg['_id']) for msg in oldest_messages_cursor] # _id ko string mein convert karein
+                delete_ids = [msg['_id'] for msg in oldest_messages_cursor]
 
                 if delete_ids:
                     delete_result = messages_collection.delete_many({"_id": {"$in": delete_ids}})
@@ -111,7 +110,7 @@ async def generate_and_send_group_reply(event):
     # --- Typing status dikhana aur 0.5 second ka delay ---
     await userbot.send_read_acknowledge(chat_id, message_id)
     await userbot.send_action(chat_id, SendMessageTypingAction())
-    await asyncio.sleep(0.5) # Minimum 0.5 second delay
+    await asyncio.sleep(0.5) # Minimum 0.5 second ka delay
 
     reply_text = None
     sticker_to_send = None
@@ -120,7 +119,7 @@ async def generate_and_send_group_reply(event):
     # --- 1. Message Storage (Group messages hi store honge) ---
     sender = await event.get_sender()
     
-    # Store associated emojis
+    # Store associated emojis (yahan common emojis ki list hai)
     emojis_in_message = [char for char in incoming_message if 0x1F600 <= ord(char) <= 0x1F64F or # Basic smileys
                                                              0x1F300 <= ord(char) <= 0x1F5FF or # Misc symbols
                                                              0x1F900 <= ord(char) <= 0x1F9FF or # Supplemental symbols
@@ -144,16 +143,17 @@ async def generate_and_send_group_reply(event):
 
     # --- 2. Reply Generation Logic (Self-learning from stored group data) ---
     # Database mein similar messages dhoondein aur unke replies dekhein
-    keywords = incoming_message.lower().split()[:5] # Take first 5 words as keywords
+    # Yahan simple keyword-based search hai. Advanced NLP ke liye aap Word Embeddings, TF-IDF use kar sakte hain.
+    keywords = incoming_message.lower().split()[:5] # Message ke pehle 5 shabdon ko keywords mana.
     
     search_query = {
         "chat_id": chat_id,
-        "is_bot_reply": True, # Hum bot ke replies search kar rahe hain
-        # Search in 'original_message' field for keywords
+        "is_bot_reply": True, # Hum bot ke pehle ke replies search kar rahe hain
+        # Search in 'original_message' field for keywords (jo bot ne pehle reply kiya tha)
         "original_message": {"$regex": f"({'|'.join(re.escape(k) for k in keywords if k)})", "$options": "i"} 
     }
     
-    past_bot_reply = messages_collection.find_one(search_query, sort=[("timestamp", -1)]) 
+    past_bot_reply = messages_collection.find_one(search_query, sort=[("timestamp", -1)]) # Sabse latest relevant reply
 
     if past_bot_reply and 'reply_text' in past_bot_reply:
         reply_text = past_bot_reply['reply_text']
@@ -161,8 +161,7 @@ async def generate_and_send_group_reply(event):
         sticker_to_send = past_bot_reply.get('sticker_id', None)
         print(f"Found existing reply from DB: {reply_text}")
     else:
-        # Fallback: Agar specific reply nahi mila, toh kuch random common reply choose karein
-        # Ladkiyon jaise expressions aur emojis yahan bhi add karein
+        # Fallback: Agar specific reply nahi mila, toh kuch random common reply choose karein (girl-like tone)
         common_replies = [
             "Haa! 😄", "Theek hai! 👍", "Hmm...🤔", "Sahi baat hai! ✅", "Kya chal raha hai? 👀",
             "Accha! ✨", "Samajh gayi! 😉", "Bilkul! 👍", "Baat kar! 🗣️", "Good! 😊",
@@ -177,9 +176,10 @@ async def generate_and_send_group_reply(event):
             emojis_to_send.append(random.choice(['😂', '😊', '🥳', '😎', '👍', '✨', '💖', '🥰']))
 
         # Randomly decide to send a sticker if no specific reply was found and no text reply selected
-        sticker_list = [ # Replace with actual working sticker IDs of girl-like stickers
-            # Example: "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE", # Cute girl sticker 1
-            # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE"  # Cute girl sticker 2
+        sticker_list = [ # !!! Yahan apne girl-like stickers ki actual IDs daalein !!!
+            # Example (replace with your actual sticker IDs):
+            # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE",
+            # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE"
         ]
         if not reply_text.strip() and sticker_list and random.random() < 0.7: # 70% chance to send a random sticker if no text
             sticker_to_send = random.choice(sticker_list)
@@ -222,7 +222,7 @@ async def generate_and_send_group_reply(event):
             if not final_reply_text.strip(): # Agar sirf sticker bhejna hai
                  await userbot.send_file(chat_id, sticker_to_send, reply_to=message_id)
             else: # Agar text bhi hai, toh sticker alag message mein
-                 await userbot.send_file(chat_id, sticker_to_send)
+                 await userbot.send_file(chat_id, sticker_to_id=sticker_to_send) # reply_to=message_id remove kiya for distinct message
             print(f"Replied with sticker in {chat_id}: '{sticker_to_send}'")
 
         # Apne reply ko MongoDB mein store karein (conversation pair ke roop mein)
