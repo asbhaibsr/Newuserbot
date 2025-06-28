@@ -1,4 +1,4 @@
-telethon
+Telethon==1.28.0
 pymongo
 flask
 dnspython # PyMongo ke liye aksar zaroori hota hai
