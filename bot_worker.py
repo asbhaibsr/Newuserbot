@@ -289,7 +289,7 @@ async def handle_private_message(event):
     except Exception as e:
         print(f"Error sending typing action: {e}")
 
-    reply_to_send = random.choice(PRIVATE_REPLY_TEXT_FUNCTIONS_GIRL_LIKE)
+    reply_to_send = random.choice(PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE) # Changed from PRIVATE_REPLY_TEXT_FUNCTIONS_GIRL_LIKE
     await event.reply(reply_to_send)
     print(f"Replied privately to {sender.id} with girl-like funny message.")
 
