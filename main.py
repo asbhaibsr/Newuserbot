@@ -40,7 +40,6 @@ userbot = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 # --- Global variables ---
 last_processed_message_id = {}
-# Chat ID ke hisaab se last reply ka timestamp store karega
 last_reply_timestamp = {} 
 REPLY_COOLDOWN_SECONDS = 3 # Aapki 3 second ki limit
 
@@ -66,7 +65,7 @@ async def manage_db_size():
     DELETE_PERCENTAGE = 0.50 
 
     while True:
-        await asyncio.sleep(3600)
+        await asyncio.sleep(3600) # Har ghante check karega
         try:
             total_messages = messages_collection.count_documents({}) 
             print(f"Current DB size: {total_messages} messages.")
@@ -95,24 +94,26 @@ async def generate_and_send_group_reply(event):
     chat_id = event.chat_id
     message_id = event.id # Current message ID
     
+    # Ignore outgoing messages or already processed messages
     if event.out or (chat_id in last_processed_message_id and last_processed_message_id[chat_id] == message_id):
         return
     
-    # 3 second cooldown check
+    # --- Cooldown Check ---
     current_time = datetime.utcnow()
     if chat_id in last_reply_timestamp:
         time_since_last_reply = (current_time - last_reply_timestamp[chat_id]).total_seconds()
         if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
             print(f"Cooldown active for chat {chat_id}. Skipping reply. Time since last reply: {time_since_last_reply:.2f}s")
-            return # Reply mat karo agar cooldown active hai
+            return # Agar cooldown active hai, toh reply mat karo
+    
+    last_processed_message_id[chat_id] = message_id # Ab message ko processed mark karo
 
-    last_processed_message_id[chat_id] = message_id
-
+    # Links aur usernames skip karein
     if re.search(r'http[s]?://\S+|@\S+', incoming_message, re.IGNORECASE):
         print(f"Skipping incoming message with link/username: {incoming_message}")
         return
 
-    # --- Typing status dikhana aur 0.5 second ka delay ---
+    # Typing status dikhana aur 0.5 second ka delay
     await event.mark_read()
     try:
         input_peer = await userbot.get_input_entity(chat_id)
@@ -123,9 +124,8 @@ async def generate_and_send_group_reply(event):
 
     reply_text = None
     sticker_to_send = None
-    emojis_to_send = [] # Har reply ke liye emojis ko reset karein
-
-    # --- 1. Message Storage (Group messages hi store honge) ---
+    
+    # --- 1. Message Storage (Sirf User ke Group messages store honge) ---
     sender = await event.get_sender()
     
     emojis_in_message = [char for char in incoming_message if 0x1F600 <= ord(char) <= 0x1F64F or 
@@ -150,128 +150,131 @@ async def generate_and_send_group_reply(event):
     })
     print(f"Stored group message from {sender.id} in {chat_id}: '{incoming_message}'")
 
-    # --- 2. Reply Generation Logic (Self-learning from stored group data) ---
+    # --- 2. Reply Generation Logic (Ab bot apne replies store nahi karega) ---
     # Handle "Searching For..." messages first
     if "searching for" in incoming_message.lower():
         print(f"Detected 'Searching For' message: '{incoming_message}'. Providing generic reply.")
         common_replies_for_generic = [
-            "Hmm... theek hai! 👍", "Samajh gayi! ✨", "Okay! 😊", "Dekhti hu! 👀"
+            "Hmm... theek hai!", "Samajh gayi!", "Okay!", "Dekhti hu!"
         ]
         reply_text = random.choice(common_replies_for_generic)
-        emojis_to_send = random.choice([['👍'], ['😁'], ['😂']])
     else:
         # Define a more comprehensive list of stop words for Hindi
         stop_words_hindi = [
             'the', 'and', 'is', 'a', 'to', 'in', 'it', 'i', 'of', 'for', 'on', 'with', 'as', 'at', 'this', 'that', 'he', 'she', 'you', 'they', 'we', 'my', 'your', 'his', 'her', 'its', 'our', 'their', # English stop words
             'hai', 'kya', 'kar', 'raha', 'ho', 'tum', 'main', 'ko', 'hi', 'mein', 'pr', 'jago', 'wahan', 'movie', 'search', 'group', 'nam', 'likho', 'ki', 'aapko', 'direct', 'file', 'mil', 'jayegi', # Hindi specific
             'go', 'profile', 'there', 'link', 'all', 'movies', 'webseries', 'click', 'photo', # From previous logs, possibly external bot related
-            'bhi', 'hum', 'us', 'yeh', 'woh', 'haan', 'nahi', 'kuch', 'aur', 'kaise', 'kab', 'kyun', 'kaha', 'kon', 'ka', 'bata', 'de', 'bhai', 'be', 'teri', 'to', 'losu', 'chutiya', 'pagal', 'kon', 'aap', 'ka', 'name', 'pta', 'na', 'kiya', 'chak', 'rah', 'chutiya', 'sach', 'bhag', 'are', 'abe' # More common and potentially offensive words
+            'bhi', 'hum', 'us', 'yeh', 'woh', 'haan', 'nahi', 'kuch', 'aur', 'kaise', 'kab', 'kyun', 'kaha', 'kon', 'ka', 'bata', 'de', 'bhai', 'be', 'teri', 'to', 'losu', 'chutiya', 'pagal', 'kon', 'aap', 'ka', 'name', 'pta', 'na', 'kiya', 'chak', 'rah', 'chutiya', 'sach', 'bhag', 'are', 'abe', 'yaar', 'oye', 'tum', 'main', 'kya', 'kaise', 'mujhe', 'tera', 'mere', 'sab', 'sirf', 'ek', 'fir', 'hota', 'hoga', 'karoge', 'apna', 'apni', 'apne', 'usse', 'isme', 'kabhi', 'har', 'roz', 'fir', 'kahi'
         ]
 
         # Build regex from user's keywords (after filtering stop words and short words)
-        # Only consider words with length >= 2 (to allow for "hi", "hey" if not in stop words)
         keywords_for_search = [
             word for word in re.findall(r'\b\w+\b', incoming_message.lower()) 
             if len(word) >= 2 and word not in stop_words_hindi
         ]
         
-        if keywords_for_search:
-            # Look for past bot replies whose 'original_message' (the user's input at that time)
-            # matches the current keywords.
-            search_query_for_past_bot_reply = {
-                "chat_id": chat_id,
-                "is_bot_reply": True,
-                "original_message": {"$regex": f"({'|'.join(re.escape(w) for w in keywords_for_search)})", "$options": "i"} 
-            }
-            
-            past_bot_reply_doc = messages_collection.find_one(search_query_for_past_bot_reply, sort=[("reply_timestamp", -1)])
+        # Bot ab sirf common_replies और stickers पर निर्भर करेगा।
+        print("Bot will now only use common replies or stickers, not learn from its own past replies.")
 
-            if past_bot_reply_doc and 'reply_text' in past_bot_reply_doc:
-                reply_text = past_bot_reply_doc['reply_text']
-                emojis_to_send = past_bot_reply_doc.get('emojis', []) # Use emojis from the past reply
-                sticker_to_send = past_bot_reply_doc.get('sticker_id', None)
-                print(f"Found existing reply from DB: '{reply_text}' based on keywords: {keywords_for_search}")
-            else:
-                print(f"No relevant past bot reply found for keywords: {keywords_for_search}. Using common replies.")
-        else:
-            print("No meaningful keywords extracted from message. Using common replies.")
+        # Common replies (इमोजी के बिना)
+        common_replies = [
+            "Haa!", "Theek hai!", "Hmm...", "Sahi baat hai!", "Kya chal raha hai?",
+            "Accha!", "Samajh gayi!", "Bilkul!", "Baat kar!", "Good!",
+            "Aur batao?", "Masti chal rahi hai!", "Kuch naya?", "Wah!", "Kya kehna!",
+            "Hehe!", "Ek number!", "Awesome!", "Nice!", "Super!",
+            "Hellooo!", "Kaisi ho?", "Sab theek hai?", "Bolo na!", "Arey wah!",
+            "Kya planning hai?", "Maza aa raha hai!", "Aur batao kya chal raha hai?",
+            "Din kaisa raha?", "Kuch khaas?", "Main toh bas yahi hu!", "Aur kya kar rahe ho?",
+            "Mausam kaisa hai?", "Hansi nahi ruk rahi!", "Bahut mazaa aa raha hai!"
+        ]
+        reply_text = random.choice(common_replies)
 
-        if not reply_text: # Agar koi relevant reply nahi mila ya keywords nahi the
-            common_replies = [
-                "Haa! 😄", "Theek hai! 👍", "Hmm...🤔", "Sahi baat hai! ✅", "Kya chal raha hai? 👀",
-                "Accha! ✨", "Samajh gayi! 😉", "Bilkul! 👍", "Baat kar! 🗣️", "Good! 😊",
-                "Aur batao? 👇", "Masti chal rahi hai! 😂", "Kuch naya? 🤩", "Wah! 🥳", "Kya kehna! 😲",
-                "Hehe! 😊", "Ek number! 👌", "Awesome! ✨", "Nice! 😄", "Super! 💖",
-                "Hellooo! 🥰", "Kaisi ho? 😊", "Sab theek hai? ✨", "Bolo na! 💬", "Arey wah! 🤩",
-                "Kya planning hai? 🤔", "Maza aa raha hai! 🎉", "Aur batao kya chal raha hai? 💬",
-                "Din kaisa raha? ☀️", "Kuch khaas? ✨"
-            ]
-            reply_text = random.choice(common_replies)
-            
-            # Ensure emojis are not appended multiple times in fallback replies
-            if not reply_text.strip(): # If reply is just spaces, use only emojis
-                emojis_to_send = random.choice([['👍'], ['😁'], ['😂'], ['🥳'], ['😎'], ['💖'], ['🥰'], ['✨']])
-            elif random.random() < 0.6: # Otherwise, sometimes add an emoji
-                emojis_to_send = [random.choice(['😂', '😊', '🥳', '😎', '👍', '✨', '💖', '🥰'])] # Only one emoji
+    # --- Sticker Logic ---
+    sticker_list = [ 
+        # !!! यहाँ अपने गर्ल-लाइक स्टिकर की ACTUAL IDs डालें !!!
+        # उदाहरण (इन्हें अपने स्टिकर IDs से बदलें):
+        "CAACAgIAAxkBAAEF_1lmW36q2G3AASU76C_W_u6mG30bO_wAAmV1AAKqFMFZ7dYv-89yE9M0BA", # Cute Girl Sticker 1
+        "CAACAgIAAxkBAAEF_1tmW36q2G3AASU76C_W_u6mG30bO_wAAmV1AAKqFMFZ7dYv-89yE9M0BA", # Cute Girl Sticker 2
+        "CAACAgIAAxkBAAEF_11mW36q2G3AASU76C_W_u6mG30bO_wAAmV1AAKqFMFZ7dYv-89yE9M0BA", # Cute Girl Sticker 3
+        # Telegram पर @StickerIdBot जैसे बॉट का उपयोग करके स्टिकर ID प्राप्त करें।
+    ]
+    
+    # तय करें कि स्टिकर भेजना है या टेक्स्ट रिप्लाई
+    # अगर sticker_list खाली नहीं है और 40% मौका है, तो स्टिकर भेजो
+    if sticker_list and random.random() < 0.4: # 40% chance of sending a sticker
+        sticker_to_send = random.choice(sticker_list)
+        reply_text = "" # अगर स्टिकर भेज रहे हैं, तो टेक्स्ट रिप्लाई खाली रखो
+        print(f"Selecting sticker: {sticker_to_send}")
+    else:
+        # अगर स्टिकर नहीं भेज रहे, तो टेक्स्ट रिप्लाई के साथ एक रैंडम इमोजी जोड़ो
+        # यह सुनिश्चित करेगा कि टेक्स्ट रिप्लाई में एक इमोजी हो
+        emojis_for_text = [
+            '😂', '😊', '🥳', '😎', '👍', '✨', '💖', '🥰', '🤣', '😅', '🤗', '🌟', '🌈', '🔥'
+        ]
+        reply_text += " " + random.choice(emojis_for_text) # टेक्स्ट के साथ एक इमोजी जोड़ें
 
-            sticker_list = [ # !!! Yahan apne girl-like stickers ki actual IDs daalein !!!
-                # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE",
-                # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE"
-            ]
-            if not reply_text.strip() and sticker_list and random.random() < 0.7:
-                sticker_to_send = random.choice(sticker_list)
-                emojis_to_send = [] # No emojis if sending sticker alone
+        # --- 3. Word count control (1-8 words) ---
+        if reply_text:
+            words = reply_text.split()
+            if len(words) > 8:
+                # इमोजी को आखिरी शब्द के साथ रखें, अगर वो मौजूद है
+                if words[-1] in emojis_for_text:
+                    reply_text = " ".join(words[:random.randint(4, 7)]) + " " + words[-1]
+                else:
+                    reply_text = " ".join(words[:random.randint(4, 8)])
 
-            print(f"Using fallback reply: '{reply_text}' or sticker: '{sticker_to_send}'")
+        # --- 4. Adjust length based on user message (2, 3, or 4 words) ---
+        if reply_text:
+            incoming_len = len(incoming_message.split())
+            if incoming_len <= 5 and len(reply_text.split()) > 3:
+                # इमोजी को आखिरी शब्द के साथ रखें
+                last_word = reply_text.split()[-1]
+                if last_word in emojis_for_text:
+                    reply_text = " ".join(reply_text.split()[:random.randint(2, 3)]) + " " + last_word
+                else:
+                    reply_text = " ".join(reply_text.split()[:random.randint(2, 4)])
+            elif incoming_len <= 12 and len(reply_text.split()) > 5:
+                # इमोजी को आखिरी शब्द के साथ रखें
+                last_word = reply_text.split()[-1]
+                if last_word in emojis_for_text:
+                    reply_text = " ".join(reply_text.split()[:random.randint(4, 5)]) + " " + last_word
+                else:
+                    reply_text = " ".join(reply_text.split()[:random.randint(4, 6)])
 
-    # --- 3. Word count control (1-8 words) ---
-    if reply_text:
-        words = reply_text.split()
-        if len(words) > 8:
-            reply_text = " ".join(words[:8])
+        # --- 5. Final check: Links aur usernames filter karein ---
+        if reply_text and re.search(r'http[s]?://\S+|@\S+', reply_text, re.IGNORECASE):
+            reply_text = "Main links ya usernames nahi bhej sakti. Sorry! 😔"
 
-    # --- 4. Adjust length based on user message (2, 3, or 4 words) ---
-    # Ye logic ab thoda kam aggressive hoga, kyunki common replies mein hi variety aa gayi hai
-    if reply_text:
-        incoming_len = len(incoming_message.split())
-        if incoming_len <= 5 and len(reply_text.split()) > 3:
-            reply_text = " ".join(reply_text.split()[:random.randint(2, 4)]) # Randomize length for short replies
-        elif incoming_len <= 12 and len(reply_text.split()) > 5:
-            reply_text = " ".join(reply_text.split()[:random.randint(4, 6)])
-
-    # --- 5. Final check: Links aur usernames filter karein ---
-    if reply_text and re.search(r'http[s]?://\S+|@\S+', reply_text, re.IGNORECASE):
-        reply_text = "Main links ya usernames nahi bhej sakti. Sorry! 😔"
 
     # --- Reply send karna ---
-    if reply_text or sticker_to_send:
-        final_reply_text = reply_text + "".join(emojis_to_send) if reply_text else "".join(emojis_to_send)
-        
-        sent_message = None
-        if final_reply_text.strip():
-            sent_message = await userbot.send_message(chat_id, final_reply_text, reply_to=message_id)
-            print(f"Replied with text in {chat_id}: '{final_reply_text}'")
-
-        if sticker_to_send:
-            await userbot.send_file(chat_id, sticker_to_send)
-            print(f"Replied with sticker in {chat_id}: '{sticker_to_send}'")
-
-        if sent_message or sticker_to_send:
-            messages_collection.insert_one({
-                'chat_id': chat_id,
-                'original_message_id': message_id, # This is the ID of the user's message
-                'reply_text': final_reply_text,
-                'reply_timestamp': datetime.utcnow(),
-                'is_bot_reply': True, # Mark this as bot's reply
-                'emojis': emojis_to_send,
-                'sticker_id': sticker_to_send,
-                'original_message': incoming_message # Store the actual user's message for context
-            })
-            print(f"Stored bot's reply for message ID {message_id}")
-            # Successful reply, update the last reply timestamp for this chat
-            last_reply_timestamp[chat_id] = datetime.utcnow() 
+    sent_message_successfully = False
+    if reply_text.strip(): # अगर text reply है और खाली नहीं है
+        sent_message = await userbot.send_message(chat_id, reply_text, reply_to=message_id)
+        print(f"Replied with text in {chat_id}: '{reply_text}'")
+        sent_message_successfully = True
+    elif sticker_to_send: # अगर text reply नहीं है, लेकिन sticker है
+        await userbot.send_file(chat_id, sticker_to_send, reply_to=message_id)
+        print(f"Replied with sticker in {chat_id}: '{sticker_to_send}'")
+        sent_message_successfully = True
     else:
         print(f"No reply generated for message ID {message_id}.")
+
+    if sent_message_successfully:
+        # सफल रिप्लाई, इस चैट के लिए आखिरी रिप्लाई टाइमस्टैम्प अपडेट करें
+        last_reply_timestamp[chat_id] = datetime.utcnow() 
+        # बॉट के रिप्लाई अब स्टोर नहीं होंगे, इसलिए यह ब्लॉक हटाया गया है
+        # messages_collection.insert_one({
+        #     'chat_id': chat_id,
+        #     'original_message_id': message_id,
+        #     'reply_text': final_reply_text,
+        #     'reply_timestamp': datetime.utcnow(),
+        #     'is_bot_reply': True,
+        #     'emojis': emojis_to_send,
+        #     'sticker_id': sticker_to_send,
+        #     'original_message': incoming_message
+        # })
+        # print(f"Bot's reply for message ID {message_id} was NOT stored as per request.")
+
 
 # --- Event Handlers ---
 @userbot.on(events.NewMessage(incoming=True))
