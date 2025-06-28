@@ -38,8 +38,11 @@ except Exception as e:
 # --- Telethon Client Setup ---
 userbot = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
-# --- Global variable to store last message ID per chat to avoid double replies ---
+# --- Global variables ---
 last_processed_message_id = {}
+# Chat ID ke hisaab se last reply ka timestamp store karega
+last_reply_timestamp = {} 
+REPLY_COOLDOWN_SECONDS = 3 # Aapki 3 second ki limit
 
 # --- Flask App for Monitoring (Port 8080) ---
 app = Flask(__name__)
@@ -95,6 +98,14 @@ async def generate_and_send_group_reply(event):
     if event.out or (chat_id in last_processed_message_id and last_processed_message_id[chat_id] == message_id):
         return
     
+    # 3 second cooldown check
+    current_time = datetime.utcnow()
+    if chat_id in last_reply_timestamp:
+        time_since_last_reply = (current_time - last_reply_timestamp[chat_id]).total_seconds()
+        if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
+            print(f"Cooldown active for chat {chat_id}. Skipping reply. Time since last reply: {time_since_last_reply:.2f}s")
+            return # Reply mat karo agar cooldown active hai
+
     last_processed_message_id[chat_id] = message_id
 
     if re.search(r'http[s]?://\S+|@\S+', incoming_message, re.IGNORECASE):
@@ -135,7 +146,7 @@ async def generate_and_send_group_reply(event):
         'emojis': emojis_in_message,
         'sticker_id': sticker_to_store_id,
         'is_bot_reply': False, # Mark as user message
-        'message_id': message_id # <--- THIS IS THE NEW ADDITION
+        'message_id': message_id 
     })
     print(f"Stored group message from {sender.id} in {chat_id}: '{incoming_message}'")
 
@@ -143,18 +154,26 @@ async def generate_and_send_group_reply(event):
     # Handle "Searching For..." messages first
     if "searching for" in incoming_message.lower():
         print(f"Detected 'Searching For' message: '{incoming_message}'. Providing generic reply.")
-        common_replies = [
-            "Haa! 😄", "Theek hai! 👍", "Hmm...🤔", "Sahi baat hai! ✅", "Kya chal raha hai? 👀",
-            "Accha! ✨", "Samajh gayi! 😉", "Bilkul! 👍", "Baat kar! 🗣️", "Good! 😊",
-            "Aur batao? 👇", "Masti chal rahi hai! 😂", "Kuch naya? 🤩", "Wah! 🥳", "Kya kehna! 😲",
-            "Hehe! 😊", "Ek number! 👌", "Awesome! ✨", "Nice! 😄", "Super! 💖", " "
+        common_replies_for_generic = [
+            "Hmm... theek hai! 👍", "Samajh gayi! ✨", "Okay! 😊", "Dekhti hu! 👀"
         ]
-        reply_text = random.choice(common_replies) # Always use generic for these
+        reply_text = random.choice(common_replies_for_generic)
         emojis_to_send = random.choice([['👍'], ['😁'], ['😂']])
     else:
-        # Normal message processing for self-learning
+        # Define a more comprehensive list of stop words for Hindi
+        stop_words_hindi = [
+            'the', 'and', 'is', 'a', 'to', 'in', 'it', 'i', 'of', 'for', 'on', 'with', 'as', 'at', 'this', 'that', 'he', 'she', 'you', 'they', 'we', 'my', 'your', 'his', 'her', 'its', 'our', 'their', # English stop words
+            'hai', 'kya', 'kar', 'raha', 'ho', 'tum', 'main', 'ko', 'hi', 'mein', 'pr', 'jago', 'wahan', 'movie', 'search', 'group', 'nam', 'likho', 'ki', 'aapko', 'direct', 'file', 'mil', 'jayegi', # Hindi specific
+            'go', 'profile', 'there', 'link', 'all', 'movies', 'webseries', 'click', 'photo', # From previous logs, possibly external bot related
+            'bhi', 'hum', 'us', 'yeh', 'woh', 'haan', 'nahi', 'kuch', 'aur', 'kaise', 'kab', 'kyun', 'kaha', 'kon', 'ka', 'bata', 'de', 'bhai', 'be', 'teri', 'to', 'losu', 'chutiya', 'pagal', 'kon', 'aap', 'ka', 'name', 'pta', 'na', 'kiya', 'chak', 'rah', 'chutiya', 'sach', 'bhag', 'are', 'abe' # More common and potentially offensive words
+        ]
+
         # Build regex from user's keywords (after filtering stop words and short words)
-        keywords_for_search = [word for word in re.findall(r'\b\w+\b', incoming_message.lower()) if len(word) >= 3 and word not in ['the', 'and', 'is', 'a', 'to', 'in', 'it', 'i', 'of', 'for', 'on', 'with', 'as', 'at', 'this', 'that', 'he', 'she', 'you', 'they', 'we', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'hai', 'kya', 'kar', 'raha', 'ho', 'tum', 'main', 'ko', 'hi', 'mein', 'pr', 'jago', 'wahan', 'movie', 'search', 'group', 'nam', 'likho', 'ki', 'aapko', 'direct', 'file', 'mil', 'jayegi', 'go', 'profile', 'there', 'is', 'a', 'link', 'to', 'all', 'the', 'movies', 'and', 'webseries', 'click', 'photo', 'for', 'a', 'theek', 'baat', 'sahi']] # Added more stop words
+        # Only consider words with length >= 2 (to allow for "hi", "hey" if not in stop words)
+        keywords_for_search = [
+            word for word in re.findall(r'\b\w+\b', incoming_message.lower()) 
+            if len(word) >= 2 and word not in stop_words_hindi
+        ]
         
         if keywords_for_search:
             # Look for past bot replies whose 'original_message' (the user's input at that time)
@@ -182,14 +201,18 @@ async def generate_and_send_group_reply(event):
                 "Haa! 😄", "Theek hai! 👍", "Hmm...🤔", "Sahi baat hai! ✅", "Kya chal raha hai? 👀",
                 "Accha! ✨", "Samajh gayi! 😉", "Bilkul! 👍", "Baat kar! 🗣️", "Good! 😊",
                 "Aur batao? 👇", "Masti chal rahi hai! 😂", "Kuch naya? 🤩", "Wah! 🥳", "Kya kehna! 😲",
-                "Hehe! 😊", "Ek number! 👌", "Awesome! ✨", "Nice! 😄", "Super! 💖", " "
+                "Hehe! 😊", "Ek number! 👌", "Awesome! ✨", "Nice! 😄", "Super! 💖",
+                "Hellooo! 🥰", "Kaisi ho? 😊", "Sab theek hai? ✨", "Bolo na! 💬", "Arey wah! 🤩",
+                "Kya planning hai? 🤔", "Maza aa raha hai! 🎉", "Aur batao kya chal raha hai? 💬",
+                "Din kaisa raha? ☀️", "Kuch khaas? ✨"
             ]
             reply_text = random.choice(common_replies)
             
-            if not reply_text.strip():
+            # Ensure emojis are not appended multiple times in fallback replies
+            if not reply_text.strip(): # If reply is just spaces, use only emojis
                 emojis_to_send = random.choice([['👍'], ['😁'], ['😂'], ['🥳'], ['😎'], ['💖'], ['🥰'], ['✨']])
-            elif random.random() < 0.6:
-                emojis_to_send.append(random.choice(['😂', '😊', '🥳', '😎', '👍', '✨', '💖', '🥰']))
+            elif random.random() < 0.6: # Otherwise, sometimes add an emoji
+                emojis_to_send = [random.choice(['😂', '😊', '🥳', '😎', '👍', '✨', '💖', '🥰'])] # Only one emoji
 
             sticker_list = [ # !!! Yahan apne girl-like stickers ki actual IDs daalein !!!
                 # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE",
@@ -197,7 +220,7 @@ async def generate_and_send_group_reply(event):
             ]
             if not reply_text.strip() and sticker_list and random.random() < 0.7:
                 sticker_to_send = random.choice(sticker_list)
-                emojis_to_send = []
+                emojis_to_send = [] # No emojis if sending sticker alone
 
             print(f"Using fallback reply: '{reply_text}' or sticker: '{sticker_to_send}'")
 
@@ -208,12 +231,13 @@ async def generate_and_send_group_reply(event):
             reply_text = " ".join(words[:8])
 
     # --- 4. Adjust length based on user message (2, 3, or 4 words) ---
+    # Ye logic ab thoda kam aggressive hoga, kyunki common replies mein hi variety aa gayi hai
     if reply_text:
         incoming_len = len(incoming_message.split())
-        if incoming_len <= 5:
-            reply_text = " ".join(reply_text.split()[:3]) if len(reply_text.split()) > 3 else reply_text
-        elif incoming_len <= 12:
-            reply_text = " ".join(reply_text.split()[:5]) if len(reply_text.split()) > 5 else reply_text
+        if incoming_len <= 5 and len(reply_text.split()) > 3:
+            reply_text = " ".join(reply_text.split()[:random.randint(2, 4)]) # Randomize length for short replies
+        elif incoming_len <= 12 and len(reply_text.split()) > 5:
+            reply_text = " ".join(reply_text.split()[:random.randint(4, 6)])
 
     # --- 5. Final check: Links aur usernames filter karein ---
     if reply_text and re.search(r'http[s]?://\S+|@\S+', reply_text, re.IGNORECASE):
@@ -244,6 +268,8 @@ async def generate_and_send_group_reply(event):
                 'original_message': incoming_message # Store the actual user's message for context
             })
             print(f"Stored bot's reply for message ID {message_id}")
+            # Successful reply, update the last reply timestamp for this chat
+            last_reply_timestamp[chat_id] = datetime.utcnow() 
     else:
         print(f"No reply generated for message ID {message_id}.")
 
