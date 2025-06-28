@@ -109,8 +109,8 @@ async def generate_and_send_group_reply(event):
         return
 
     # --- Typing status dikhana aur 0.5 second ka delay ---
-    # `send_read_acknowledge` ki jagah `iter_read_history` ka istemal
-    await userbot.iter_read_history(chat_id, max_id=message_id)
+    # Messages ko read mark karne ke liye event.mark_read() ka istemal
+    await event.mark_read() # Yeh seedha event se related message ko read mark karega
     await userbot.send_action(chat_id, SendMessageTypingAction())
     await asyncio.sleep(0.5) # Minimum 0.5 second ka delay
 
@@ -254,8 +254,8 @@ async def handle_private_message(event):
     print(f"Received private message from {sender.id}: {event.raw_text}")
     
     # Typing status
-    # `send_read_acknowledge` ki jagah `iter_read_history` ka istemal
-    await userbot.iter_read_history(event.chat_id, max_id=event.id)
+    # Messages ko read mark karne ke liye event.mark_read() ka istemal
+    await event.mark_read() # Yeh seedha event se related message ko read mark karega
     await userbot.send_action(event.chat_id, SendMessageTypingAction())
     await asyncio.sleep(0.5) # Delay
 
