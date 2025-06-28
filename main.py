@@ -6,7 +6,7 @@ from telethon.sync import TelegramClient, events
 from telethon.tl.functions.messages import SetTypingRequest
 from telethon.tl.types import SendMessageTypingAction
 from telethon.sessions import StringSession
-from pymongo import MongoClient # PyMongo is synchronous by default
+from pymongo import MongoClient
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 
@@ -65,7 +65,6 @@ async def manage_db_size():
     while True:
         await asyncio.sleep(3600)
         try:
-            # `await` removed from PyMongo operations
             total_messages = messages_collection.count_documents({}) 
             print(f"Current DB size: {total_messages} messages.")
 
@@ -77,7 +76,6 @@ async def manage_db_size():
                 delete_ids = [msg['_id'] for msg in oldest_messages_cursor]
 
                 if delete_ids:
-                    # `await` removed from PyMongo operations
                     delete_result = messages_collection.delete_many({"_id": {"$in": delete_ids}})
                     print(f"Deleted {delete_result.deleted_count} old messages successfully.")
                 else:
@@ -129,7 +127,6 @@ async def generate_and_send_group_reply(event):
     else:
         sticker_to_store_id = None
 
-    # `await` removed from PyMongo insert_one
     messages_collection.insert_one({
         'chat_id': chat_id,
         'sender_id': sender.id,
@@ -142,23 +139,35 @@ async def generate_and_send_group_reply(event):
     print(f"Stored group message from {sender.id} in {chat_id}: '{incoming_message}'")
 
     # --- 2. Reply Generation Logic (Self-learning from stored group data) ---
-    keywords = incoming_message.lower().split()[:5]
+    # `incoming_message` ke words se relevant pichle bot replies search karein
+    # Pura message nahi, balki meaningful keywords use karein
     
-    search_query = {
-        "chat_id": chat_id,
-        "is_bot_reply": True, 
-        "original_message": {"$regex": f"({'|'.join(re.escape(k) for k in keywords if k)})", "$options": "i"} 
-    }
+    # Improve keyword extraction: minimum 3 chars, no stop words, unique
+    words_from_message = [word for word in re.findall(r'\b\w+\b', incoming_message.lower()) if len(word) >= 3 and word not in ['the', 'and', 'is', 'a', 'to', 'in', 'it', 'i', 'of', 'for', 'on', 'with', 'as', 'at', 'this', 'that', 'he', 'she', 'you', 'they', 'we', 'my', 'your', 'his', 'her', 'its', 'our', 'their']]
     
-    # `await` removed from PyMongo find_one
-    past_bot_reply = messages_collection.find_one(search_query, sort=[("timestamp", -1)])
+    if words_from_message:
+        # Build a regex pattern for any of the keywords
+        regex_pattern = f"({'|'.join(re.escape(w) for w in words_from_message)})"
+        
+        search_query = {
+            "chat_id": chat_id,
+            "is_bot_reply": True, # Search for bot's previous replies
+            "original_message": {"$regex": regex_pattern, "$options": "i"} # Bot's reply based on original message
+        }
+        
+        past_bot_reply = messages_collection.find_one(search_query, sort=[("reply_timestamp", -1)]) # Sort by bot's reply timestamp
 
-    if past_bot_reply and 'reply_text' in past_bot_reply:
-        reply_text = past_bot_reply['reply_text']
-        emojis_to_send = past_bot_reply.get('emojis', [])
-        sticker_to_send = past_bot_reply.get('sticker_id', None)
-        print(f"Found existing reply from DB: {reply_text}")
+        if past_bot_reply and 'reply_text' in past_bot_reply:
+            reply_text = past_bot_reply['reply_text']
+            emojis_to_send = past_bot_reply.get('emojis', [])
+            sticker_to_send = past_bot_reply.get('sticker_id', None)
+            print(f"Found existing reply from DB: {reply_text} based on keywords: {words_from_message}")
+        else:
+            print(f"No relevant past bot reply found for keywords: {words_from_message}. Using common replies.")
     else:
+        print("No meaningful keywords extracted from message. Using common replies.")
+
+    if not reply_text: # Agar koi relevant reply nahi mila ya keywords nahi the
         common_replies = [
             "Haa! 😄", "Theek hai! 👍", "Hmm...🤔", "Sahi baat hai! ✅", "Kya chal raha hai? 👀",
             "Accha! ✨", "Samajh gayi! 😉", "Bilkul! 👍", "Baat kar! 🗣️", "Good! 😊",
@@ -214,18 +223,19 @@ async def generate_and_send_group_reply(event):
             print(f"Replied with sticker in {chat_id}: '{sticker_to_send}'")
 
         if sent_message or sticker_to_send:
-            # `await` removed from PyMongo insert_one
             messages_collection.insert_one({
                 'chat_id': chat_id,
                 'original_message_id': message_id,
                 'reply_text': final_reply_text,
                 'reply_timestamp': datetime.utcnow(),
-                'is_bot_reply': True,
+                'is_bot_reply': True, # Mark this as bot's reply
                 'emojis': emojis_to_send,
                 'sticker_id': sticker_to_send,
-                'original_message': incoming_message
+                'original_message': incoming_message # Store original message for self-learning context
             })
             print(f"Stored bot's reply for message ID {message_id}")
+    else:
+        print(f"No reply generated for message ID {message_id}.")
 
 # --- Event Handlers ---
 @userbot.on(events.NewMessage(incoming=True))
@@ -260,33 +270,7 @@ async def main():
     await userbot.start()
     print("Userbot started successfully!")
 
-    # Mongo DB operations are synchronous, so we need to run them in a separate thread
-    # or use asyncio.to_thread if we want to run them in an async context without blocking.
-    # For a simple bot, this might be fine, but for heavy load, consider `motor` for async PyMongo.
-    
-    # We will wrap synchronous MongoDB calls in a ThreadPoolExecutor for `manage_db_size`
-    # if it becomes a blocking issue. For now, keep it simple.
-    
-    # As manage_db_size() now uses synchronous PyMongo methods, we need to adapt it.
-    # The `await messages_collection.count_documents({})` line was the issue.
-    # Instead of making `manage_db_size` fully asynchronous with `motor`,
-    # we'll use `asyncio.to_thread` for the synchronous PyMongo operations
-    # inside the `manage_db_size` function, to keep the main event loop non-blocking.
-
-    # Re-evaluating manage_db_size(): It's better to keep it synchronous inside
-    # a separate thread or use `motor` if you want it truly async.
-    # For simplicity, if the problem is just `InsertOneResult`, removing `await` is enough.
-    # However, `count_documents` and `delete_many` also need `await` removed.
-
-    # Let's rewrite `manage_db_size` to correctly handle synchronous PyMongo methods
-    # within an asynchronous task, using `loop.run_in_executor` or `asyncio.to_thread`.
-    # This is slightly more advanced, but necessary for truly non-blocking DB ops in an async app.
-
-    # For now, let's just remove the `await` from the `manage_db_size` function calls as well.
-    # If the bot is not under heavy load, blocking the event loop briefly for DB ops is acceptable.
-    # If it causes issues later, `motor` or `to_thread` will be necessary.
-    
-    asyncio.create_task(manage_db_size()) # This task will now run, but its internal DB ops are blocking
+    asyncio.create_task(manage_db_size())
     
     print("Userbot is running and listening for messages.")
     await userbot.run_until_disconnected()
