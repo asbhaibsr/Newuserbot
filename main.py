@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 
 # --- Configuration (Koyeb Environment Variables se aayenge) ---
+# Yeh variables aap Koyeb par set karenge, code mein directly nahi likhenge.
 API_ID = int(os.environ.get('API_ID'))
 API_HASH = os.environ.get('API_HASH')
 STRING_SESSION = os.environ.get('STRING_SESSION')
@@ -21,7 +22,7 @@ PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE = [
     "Hii! 🤗 Mujhe private mein message kiya? Kitne cute ho! 🥰 Agar tum mujhe apne group mein add karoge na, toh main wahan itni masti karungi ki sabki hansi nahi rukegi! Aur haan, hamare movie group ko bhi join kar lena - @istreamX, updates ke liye @asbhai_bsr aur chat ke liye @aschat_group. Dekho, sab list mein hain! 😉",
     "Helloo! 💖 Surprise! Tumne mujhe private message kiya. Kya chal raha hai? Suno na, agar tum mujhe apne group mein shamil karte ho, toh wahan ki chat ko main super fun bana dungi! Promise! ✨ Aur haan, yeh rahe hamare special groups: Movie group - @istreamX, Updates - @asbhai_bsr, Chat group - @aschat_group. Jaldi se aa jao! 😉",
     "Arey wah! Tum akele yahan? 😊 Aao na, mere saath groups mein masti karte hain! Agar tum mujhe apne group mein add karoge, toh main wahan sabki messages ko yaad rakhti hu aur cute cute replies deti hu. Try karoge kya? 🙈 Aur hamare ye groups bhi dekhna: @istreamX (movies), @asbhai_bsr (updates), @aschat_group (chat). See you there! 👋",
-    "Psst... Koi secret baat hai kya? 🤫 Haha! Main hu tumhari pyaari little helper. Agar tumhe group chat ko ekdum lively banana hai, toh mujhe apne group mein bulao. Main apni baaton se sabke dil jeet lungi! 💕 Aur haan, ye bhi join kar lena: Movie group - @istreamX, Updates - @asbhai_bsr, Chat group - @aschat_group. Bye! 😘",
+    "Psst... Koi secret baat hai kya? 🤫 Haha! Main hu tumhari pyaari little helper. Agar tumhe group chat ko ekdum lively banana hai, toh mujhe apne group mein bulao! Main apni baaton se sabke dil jeet lungi! 💕 Aur haan, ye bhi join kar lena: Movie group - @istreamX, Updates - @asbhai_bsr, Chat group - @aschat_group. Bye! 😘",
     "Haaaiii! Meri pyaari friend ne mujhe message kiya! 🥰 Agar tum mujhe apne group mein add karte ho, toh main wahan itni mazedar baatein karungi ki tumko aur tumhare friends ko bahut mazaa aayega. Koi bore nahi hoga, I promise! 😉 Aur yeh bhi join karna mat bhoolna: @istreamX, @asbhai_bsr, @aschat_group. Milte hain group mein! 👋"
 ]
 
@@ -108,6 +109,7 @@ async def generate_and_send_group_reply(event):
         return
 
     # --- Typing status dikhana aur 0.5 second ka delay ---
+    # `send_read_acknowledge` ko message ID ke saath theek kiya gaya hai
     await userbot.send_read_acknowledge(chat_id, message_id)
     await userbot.send_action(chat_id, SendMessageTypingAction())
     await asyncio.sleep(0.5) # Minimum 0.5 second ka delay
@@ -255,6 +257,7 @@ async def handle_private_message(event):
     print(f"Received private message from {sender.id}: {event.raw_text}")
     
     # Typing status
+    # `send_read_acknowledge` ko message ID ke saath theek kiya gaya hai
     await userbot.send_read_acknowledge(event.chat_id, event.id)
     await userbot.send_action(event.chat_id, SendMessageTypingAction())
     await asyncio.sleep(0.5) # Delay
