@@ -3,21 +3,19 @@ import asyncio
 import re
 import random
 from telethon.sync import TelegramClient, events
-from telethon.tl.types import SendMessageTypingAction
-from telethon.sessions import StringSession # Yeh line zaroori hai StringSession ke liye
+from telethon.tl.types import SendMessageTypingAction # Yeh abhi bhi chahiye action type ke liye
+from telethon.sessions import StringSession
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 
 # --- Configuration (Koyeb Environment Variables se aayenge) ---
-# Yeh variables aap Koyeb par set karenge, code mein directly nahi likhenge.
 API_ID = int(os.environ.get('API_ID'))
 API_HASH = os.environ.get('API_HASH')
 STRING_SESSION = os.environ.get('STRING_SESSION')
 MONGO_URI = os.environ.get('MONGO_URI')
 
 # --- Private Message Reply Content (Girl-like, Fun & Engaging) ---
-# Ye replies random choose honge jab koi private message karega.
 PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE = [
     "Hii! 🤗 Mujhe private mein message kiya? Kitne cute ho! 🥰 Agar tum mujhe apne group mein add karoge na, toh main wahan itni masti karungi ki sabki hansi nahi rukegi! Aur haan, hamare movie group ko bhi join kar lena - @istreamX, updates ke liye @asbhai_bsr aur chat ke liye @aschat_group. Dekho, sab list mein hain! 😉",
     "Helloo! 💖 Surprise! Tumne mujhe private message kiya. Kya chal raha hai? Suno na, agar tum mujhe apne group mein shamil karte ho, toh wahan ki chat ko main super fun bana dungi! Promise! ✨ Aur haan, yeh rahe hamare special groups: Movie group - @istreamX, Updates - @asbhai_bsr, Chat group - @aschat_group. Jaldi se aa jao! 😉",
@@ -34,11 +32,9 @@ try:
     print("MongoDB connection successful.")
 except Exception as e:
     print(f"MongoDB connection failed: {e}")
-    # Agar MongoDB connect nahi hota, toh userbot ko exit kar sakte hain
     exit()
 
 # --- Telethon Client Setup ---
-# Yahan StringSession ka istemal kiya gaya hai takki Koyeb par file system error na aaye.
 userbot = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 # --- Global variable to store last message ID per chat to avoid double replies ---
@@ -53,7 +49,6 @@ def home():
 
 @app.route('/health')
 def health_check():
-    # Simple health check, MongoDB connection bhi check kar sakte hain
     try:
         client_mongo.admin.command('ping')
         db_status = "Connected"
@@ -63,8 +58,8 @@ def health_check():
 
 # --- MongoDB Data Management Task ---
 async def manage_db_size():
-    FULL_THRESHOLD = 10000 # Example: Max 10,000 messages. Aap ise adjust kar sakte hain.
-    DELETE_PERCENTAGE = 0.50 # Purane 50% messages delete karein
+    FULL_THRESHOLD = 10000 
+    DELETE_PERCENTAGE = 0.50 
 
     while True:
         await asyncio.sleep(3600) # Har ghante check karega (1 hour = 3600 seconds)
@@ -76,7 +71,6 @@ async def manage_db_size():
                 num_to_delete = int(total_messages * DELETE_PERCENTAGE)
                 print(f"DB is getting full ({total_messages} messages), deleting {num_to_delete} oldest messages...")
 
-                # Sabse purane documents ko dhoondein aur delete karein
                 oldest_messages_cursor = messages_collection.find().sort("timestamp", 1).limit(num_to_delete)
                 delete_ids = [msg['_id'] for msg in oldest_messages_cursor]
 
@@ -97,22 +91,20 @@ async def generate_and_send_group_reply(event):
     chat_id = event.chat_id
     message_id = event.id
     
-    # Apne hi messages ya pehle se processed messages ko ignore karein
     if event.out or (chat_id in last_processed_message_id and last_processed_message_id[chat_id] == message_id):
         return
     
     last_processed_message_id[chat_id] = message_id
 
-    # Links aur usernames wale incoming messages ko skip karein (learning ke liye bhi)
     if re.search(r'http[s]?://\S+|@\S+', incoming_message, re.IGNORECASE):
         print(f"Skipping incoming message with link/username: {incoming_message}")
         return
 
     # --- Typing status dikhana aur 0.5 second ka delay ---
-    # Messages ko read mark karne ke liye event.mark_read() ka istemal
-    await event.mark_read() # Yeh seedha event se related message ko read mark karega
-    await userbot.send_action(chat_id, SendMessageTypingAction())
-    await asyncio.sleep(0.5) # Minimum 0.5 second ka delay
+    await event.mark_read()
+    # `userbot.send_action` ki jagah `userbot.action` ka istemal
+    await userbot.action(chat_id, SendMessageTypingAction()) 
+    await asyncio.sleep(0.5)
 
     reply_text = None
     sticker_to_send = None
@@ -121,11 +113,10 @@ async def generate_and_send_group_reply(event):
     # --- 1. Message Storage (Group messages hi store honge) ---
     sender = await event.get_sender()
     
-    # Store associated emojis (yahan common emojis ki list hai)
-    emojis_in_message = [char for char in incoming_message if 0x1F600 <= ord(char) <= 0x1F64F or # Basic smileys
-                                                             0x1F300 <= ord(char) <= 0x1F5FF or # Misc symbols
-                                                             0x1F900 <= ord(char) <= 0x1F9FF or # Supplemental symbols
-                                                             0x1FA70 <= ord(char) <= 0x1FAFF] # New emojis
+    emojis_in_message = [char for char in incoming_message if 0x1F600 <= ord(char) <= 0x1F64F or 
+                                                             0x1F300 <= ord(char) <= 0x1F5FF or 
+                                                             0x1F900 <= ord(char) <= 0x1F9FF or 
+                                                             0x1FA70 <= ord(char) <= 0x1FAFF]
 
     if event.sticker:
         sticker_to_store_id = event.sticker.id
@@ -139,23 +130,20 @@ async def generate_and_send_group_reply(event):
         'timestamp': datetime.utcnow(),
         'emojis': emojis_in_message,
         'sticker_id': sticker_to_store_id,
-        'is_bot_reply': False # Indicates it's an incoming user message
+        'is_bot_reply': False 
     })
     print(f"Stored group message from {sender.id} in {chat_id}: '{incoming_message}'")
 
     # --- 2. Reply Generation Logic (Self-learning from stored group data) ---
-    # Database mein similar messages dhoondein aur unke replies dekhein
-    # Yahan simple keyword-based search hai. Advanced NLP ke liye aap Word Embeddings, TF-IDF use kar sakte hain.
-    keywords = incoming_message.lower().split()[:5] # Message ke pehle 5 shabdon ko keywords mana.
+    keywords = incoming_message.lower().split()[:5]
     
     search_query = {
         "chat_id": chat_id,
-        "is_bot_reply": True, # Hum bot ke pehle ke replies search kar rahe hain
-        # Search in 'original_message' field for keywords (jo bot ne pehle reply kiya tha)
+        "is_bot_reply": True, 
         "original_message": {"$regex": f"({'|'.join(re.escape(k) for k in keywords if k)})", "$options": "i"} 
     }
     
-    past_bot_reply = messages_collection.find_one(search_query, sort=[("timestamp", -1)]) # Sabse latest relevant reply
+    past_bot_reply = messages_collection.find_one(search_query, sort=[("timestamp", -1)])
 
     if past_bot_reply and 'reply_text' in past_bot_reply:
         reply_text = past_bot_reply['reply_text']
@@ -163,78 +151,70 @@ async def generate_and_send_group_reply(event):
         sticker_to_send = past_bot_reply.get('sticker_id', None)
         print(f"Found existing reply from DB: {reply_text}")
     else:
-        # Fallback: Agar specific reply nahi mila, toh kuch random common reply choose karein (girl-like tone)
         common_replies = [
             "Haa! 😄", "Theek hai! 👍", "Hmm...🤔", "Sahi baat hai! ✅", "Kya chal raha hai? 👀",
             "Accha! ✨", "Samajh gayi! 😉", "Bilkul! 👍", "Baat kar! 🗣️", "Good! 😊",
             "Aur batao? 👇", "Masti chal rahi hai! 😂", "Kuch naya? 🤩", "Wah! 🥳", "Kya kehna! 😲",
-            "Hehe! 😊", "Ek number! 👌", "Awesome! ✨", "Nice! 😄", "Super! 💖", " " # Khali reply for just sticker/emoji sometimes
+            "Hehe! 😊", "Ek number! 👌", "Awesome! ✨", "Nice! 😄", "Super! 💖", " "
         ]
         reply_text = random.choice(common_replies)
         
-        if not reply_text.strip(): # Agar chosen reply sirf emojis ya empty string hai
-            emojis_to_send = random.choice([['👍'], ['😁'], ['😂'], ['🥳'], ['😎'], ['💖'], ['🥰'], ['✨']]) # Send a random emoji
-        elif random.random() < 0.6: # 60% chance to add a random emoji to text reply
+        if not reply_text.strip():
+            emojis_to_send = random.choice([['👍'], ['😁'], ['😂'], ['🥳'], ['😎'], ['💖'], ['🥰'], ['✨']])
+        elif random.random() < 0.6:
             emojis_to_send.append(random.choice(['😂', '😊', '🥳', '😎', '👍', '✨', '💖', '🥰']))
 
-        # Randomly decide to send a sticker if no specific reply was found and no text reply selected
         sticker_list = [ # !!! Yahan apne girl-like stickers ki actual IDs daalein !!!
-            # Example (replace with your actual sticker IDs):
             # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE",
             # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE"
         ]
-        if not reply_text.strip() and sticker_list and random.random() < 0.7: # 70% chance to send a random sticker if no text
+        if not reply_text.strip() and sticker_list and random.random() < 0.7:
             sticker_to_send = random.choice(sticker_list)
-            emojis_to_send = [] # No emojis if sending sticker only
+            emojis_to_send = []
 
         print(f"Using fallback reply: '{reply_text}' or sticker: '{sticker_to_send}'")
-
 
     # --- 3. Word count control (1-8 words) ---
     if reply_text:
         words = reply_text.split()
         if len(words) > 8:
-            reply_text = " ".join(words[:8]) # Truncate if too long
+            reply_text = " ".join(words[:8])
 
     # --- 4. Adjust length based on user message (2, 3, or 4 words) ---
     if reply_text:
         incoming_len = len(incoming_message.split())
-        if incoming_len <= 5: # Chhota user message
-            reply_text = " ".join(reply_text.split()[:3]) if len(reply_text.split()) > 3 else reply_text # Max 3 words
-        elif incoming_len <= 12: # Medium user message
-            reply_text = " ".join(reply_text.split()[:5]) if len(reply_text.split()) > 5 else reply_text # Max 5 words
-        # Else (longer message), use up to 8 words as allowed by initial truncate
+        if incoming_len <= 5:
+            reply_text = " ".join(reply_text.split()[:3]) if len(reply_text.split()) > 3 else reply_text
+        elif incoming_len <= 12:
+            reply_text = " ".join(reply_text.split()[:5]) if len(reply_text.split()) > 5 else reply_text
 
     # --- 5. Final check: Links aur usernames filter karein ---
     if reply_text and re.search(r'http[s]?://\S+|@\S+', reply_text, re.IGNORECASE):
-        reply_text = "Main links ya usernames nahi bhej sakti. Sorry! 😔" # Fallback if filtered
+        reply_text = "Main links ya usernames nahi bhej sakti. Sorry! 😔"
 
     # --- Reply send karna ---
     if reply_text or sticker_to_send:
-        # Full reply text includes emojis (if any)
         final_reply_text = reply_text + " ".join(emojis_to_send) if reply_text else "".join(emojis_to_send)
 
         sent_message = None
-        if final_reply_text.strip(): # Only send text if it's not empty after adding emojis
+        if final_reply_text.strip():
             sent_message = await userbot.send_message(chat_id, final_reply_text, reply_to=message_id)
             print(f"Replied with text in {chat_id}: '{final_reply_text}'")
 
         if sticker_to_send:
-            # Sticker always sent as a new message, not a reply to itself.
             await userbot.send_file(chat_id, sticker_to_send)
             print(f"Replied with sticker in {chat_id}: '{sticker_to_send}'")
 
-        # Apne reply ko MongoDB mein store karein (conversation pair ke roop mein)
-        if sent_message or sticker_to_send: # Store if anything was sent
+        if sent_message or sticker_to_send:
             await messages_collection.insert_one({
                 'chat_id': chat_id,
                 'original_message_id': message_id,
-                'reply_text': final_reply_text, # Will be empty if only sticker
+                'reply_text': final_reply_text,
                 'reply_timestamp': datetime.utcnow(),
-                'is_bot_reply': True, # Indicate this is a bot's reply
+                'is_bot_reply': True,
                 'emojis': emojis_to_send,
                 'sticker_id': sticker_to_send,
-                'original_message': incoming_message # Store original message for context
+                'original_message': incoming_message
             })
             print(f"Stored bot's reply for message ID {message_id}")
 
@@ -243,23 +223,21 @@ async def generate_and_send_group_reply(event):
 async def handle_all_messages(event):
     if event.is_private:
         await handle_private_message(event)
-    elif event.is_group or event.is_channel: # Channels ke messages bhi process karein (group learning logic use hogi)
+    elif event.is_group or event.is_channel:
         await generate_and_send_group_reply(event)
 
 async def handle_private_message(event):
-    if event.out: # Agar message userbot ne khud bheja hai
+    if event.out:
         return
     
     sender = await event.get_sender()
     print(f"Received private message from {sender.id}: {event.raw_text}")
     
-    # Typing status
-    # Messages ko read mark karne ke liye event.mark_read() ka istemal
-    await event.mark_read() # Yeh seedha event se related message ko read mark karega
-    await userbot.send_action(event.chat_id, SendMessageTypingAction())
-    await asyncio.sleep(0.5) # Delay
+    await event.mark_read()
+    # `userbot.send_action` ki jagah `userbot.action` ka istemal
+    await userbot.action(event.chat_id, SendMessageTypingAction())
+    await asyncio.sleep(0.5)
 
-    # Send a random funny/engaging girl-like private reply
     reply_to_send = random.choice(PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE)
     await event.reply(reply_to_send)
     print(f"Replied privately to {sender.id} with girl-like funny message.")
@@ -270,14 +248,12 @@ async def main():
     await userbot.start()
     print("Userbot started successfully!")
 
-    # Background tasks chalayein
-    asyncio.create_task(manage_db_size()) # DB cleaning task
+    asyncio.create_task(manage_db_size())
     
     print("Userbot is running and listening for messages.")
-    await userbot.run_until_disconnected() # Yeh Telethon loop ko chalta rakhega
+    await userbot.run_until_disconnected()
 
 # --- Run the application ---
 if __name__ == '__main__':
-    # Telethon loop ke liye
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
