@@ -9,11 +9,30 @@ from telethon.sessions import StringSession
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 
+# --- DEBUG: Script start indication ---
+print("--- main.py (Userbot) Script Starting ---")
+
 # --- Configuration (Koyeb Environment Variables se aayenge) ---
-API_ID = int(os.environ.get('API_ID'))
+# Each variable fetch and type conversion has a debug print
+API_ID_STR = os.environ.get('API_ID')
+print(f"DEBUG: Fetched API_ID_STR: '{API_ID_STR}' (Type: {type(API_ID_STR)})")
+try:
+    API_ID = int(API_ID_STR)
+    print(f"DEBUG: API_ID converted to int: {API_ID}")
+except (TypeError, ValueError) as e:
+    print(f"ERROR: Failed to convert API_ID to int. Value was '{API_ID_STR}'. Error: {e}")
+    # If API_ID is critical and invalid, exit to avoid further errors
+    exit(1) # Critical error, stopping process
+
 API_HASH = os.environ.get('API_HASH')
+print(f"DEBUG: Fetched API_HASH. Length: {len(API_HASH) if API_HASH else 'None/Empty'}")
+
 STRING_SESSION = os.environ.get('STRING_SESSION')
+print(f"DEBUG: Fetched STRING_SESSION. Length: {len(STRING_SESSION) if STRING_SESSION else 'None/Empty'}")
+
 MONGO_URI = os.environ.get('MONGO_URI')
+print(f"DEBUG: Fetched MONGO_URI. Starts with: {MONGO_URI[:20] if MONGO_URI else 'None/Empty'}")
+
 
 # --- Private Message Reply Content (Girl-like, Fun & Engaging) ---
 PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE = [
@@ -25,19 +44,29 @@ PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE = [
 ]
 
 # --- MongoDB Setup ---
+print("DEBUG: Attempting MongoDB connection...")
+client_mongo = None # Initialize client_mongo to None
 try:
     client_mongo = MongoClient(MONGO_URI)
     db = client_mongo['telegram_userbot_db']
     messages_collection = db['group_messages']
-    print("MongoDB connection successful for main.py Userbot.") # Log message changed
+    print("MongoDB connection successful for main.py Userbot.")
 except Exception as e:
-    print(f"MongoDB connection failed for main.py Userbot: {e}")
-    # exit() # <--- यह लाइन कमेंटेड या हटाई हुई होनी चाहिए!
+    print(f"ERROR: MongoDB connection failed for main.py Userbot: {e}")
+    # Don't exit here, so bot can still try to run without DB if necessary
+    # exit(1) # <<< MAKE SURE THIS IS COMMENTED OUT
 
 
 # --- Telethon Client Setup ---
-print("Attempting to initialize Telethon client in main.py.") # <-- डिबग लाइन
-userbot = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
+print("DEBUG: Attempting to initialize Telethon client...")
+userbot = None # Initialize userbot to None
+try:
+    userbot = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
+    print("Telethon client object created successfully.")
+except Exception as e:
+    print(f"ERROR: Failed to create Telethon client. Make sure STRING_SESSION, API_ID, API_HASH are correct. Error: {e}")
+    exit(1) # Critical error, stopping process
+
 
 # --- Global variables ---
 last_processed_message_id = {}
@@ -52,7 +81,7 @@ async def manage_db_size():
     while True:
         await asyncio.sleep(3600) # Har ghante check karega
         try:
-            if client_mongo: 
+            if client_mongo and messages_collection: # Check if MongoDB client and collection are initialized
                 total_messages = messages_collection.count_documents({}) 
                 print(f"Current DB size: {total_messages} messages.")
 
@@ -71,48 +100,43 @@ async def manage_db_size():
                 else:
                     print(f"DB size is within limits ({total_messages}/{FULL_THRESHOLD}).")
             else:
-                print("MongoDB client not initialized, skipping DB size management.") 
+                print("DEBUG: MongoDB client or collection not initialized, skipping DB size management.") 
         except Exception as e:
-            print(f"Error managing DB size: {e}")
+            print(f"ERROR: Error managing DB size: {e}")
 
 # --- Reply Generation Logic (Group Specific) ---
 async def generate_and_send_group_reply(event):
     incoming_message = event.raw_text
     chat_id = event.chat_id
-    message_id = event.id # Current message ID
+    message_id = event.id 
     
-    # Ignore outgoing messages or already processed messages
     if event.out or (chat_id in last_processed_message_id and last_processed_message_id[chat_id] == message_id):
         return
     
-    # --- Cooldown Check ---
     current_time = datetime.utcnow()
     if chat_id in last_reply_timestamp:
         time_since_last_reply = (current_time - last_reply_timestamp[chat_id]).total_seconds()
         if time_since_last_reply < REPLY_COOLDOWN_SECONDS:
-            print(f"Cooldown active for chat {chat_id}. Skipping reply. Time since last reply: {time_since_last_reply:.2f}s")
+            print(f"DEBUG: Cooldown active for chat {chat_id}. Skipping reply. Time since last reply: {time_since_last_reply:.2f}s")
             return 
     
-    last_processed_message_id[chat_id] = message_id # Ab message ko processed mark karo
+    last_processed_message_id[chat_id] = message_id 
 
-    # Links aur usernames skip karein
     if re.search(r'http[s]?://\S+|@\S+', incoming_message, re.IGNORECASE):
-        print(f"Skipping incoming message with link/username: {incoming_message}")
+        print(f"DEBUG: Skipping incoming message with link/username: {incoming_message}")
         return
 
-    # Typing status dikhana aur 0.5 second ka delay
     await event.mark_read()
     try:
         input_peer = await userbot.get_input_entity(chat_id)
         await userbot(SetTypingRequest(peer=input_peer, action=SendMessageTypingAction()))
-        await asyncio.sleep(0.5) # Minimum 0.5 second ka delay for typing
+        await asyncio.sleep(0.5) 
     except Exception as e:
-        print(f"Error sending typing action: {e}")
+        print(f"ERROR: Error sending typing action: {e}")
 
     reply_text = None
     sticker_to_send = None
     
-    # --- 1. Message Storage (Sirf User ke Group messages store honge) ---
     sender = await event.get_sender()
     
     emojis_in_message = [char for char in incoming_message if 0x1F600 <= ord(char) <= 0x1F64F or 
@@ -125,7 +149,7 @@ async def generate_and_send_group_reply(event):
     else:
         sticker_to_store_id = None
 
-    if client_mongo:
+    if client_mongo and messages_collection:
         messages_collection.insert_one({
             'chat_id': chat_id,
             'sender_id': sender.id,
@@ -133,25 +157,24 @@ async def generate_and_send_group_reply(event):
             'timestamp': datetime.utcnow(),
             'emojis': emojis_in_message,
             'sticker_id': sticker_to_store_id,
-            'is_bot_reply': False, # Mark as user message
+            'is_bot_reply': False, 
             'message_id': message_id 
         })
-        print(f"Stored group message from {sender.id} in {chat_id}: '{incoming_message}'")
+        print(f"DEBUG: Stored group message from {sender.id} in {chat_id}: '{incoming_message}'")
     else:
-        print("MongoDB not connected, skipping message storage.") 
+        print("DEBUG: MongoDB not connected, skipping message storage.") 
 
-    # --- 2. Reply Generation Logic (Ab bot apne replies store nahi karega) ---
     if "searching for" in incoming_message.lower():
-        print(f"Detected 'Searching For' message: '{incoming_message}'. Providing generic reply.")
+        print(f"DEBUG: Detected 'Searching For' message: '{incoming_message}'. Providing generic reply.")
         common_replies_for_generic = [
             "Hmm... theek hai!", "Samajh gayi!", "Okay!", "Dekhti hu!"
         ]
         reply_text = random.choice(common_replies_for_generic)
     else:
         stop_words_hindi = [
-            'the', 'and', 'is', 'a', 'to', 'in', 'it', 'i', 'of', 'for', 'on', 'with', 'as', 'at', 'this', 'that', 'he', 'she', 'you', 'they', 'we', 'my', 'your', 'his', 'her', 'its', 'our', 'their', # English stop words
-            'hai', 'kya', 'kar', 'raha', 'ho', 'tum', 'main', 'ko', 'hi', 'mein', 'pr', 'jago', 'wahan', 'movie', 'search', 'group', 'nam', 'likho', 'ki', 'aapko', 'direct', 'file', 'mil', 'jayegi', # Hindi specific
-            'go', 'profile', 'there', 'link', 'all', 'movies', 'webseries', 'click', 'photo', # From previous logs, possibly external bot related
+            'the', 'and', 'is', 'a', 'to', 'in', 'it', 'i', 'of', 'for', 'on', 'with', 'as', 'at', 'this', 'that', 'he', 'she', 'you', 'they', 'we', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 
+            'hai', 'kya', 'kar', 'raha', 'ho', 'tum', 'main', 'ko', 'hi', 'mein', 'pr', 'jago', 'wahan', 'movie', 'search', 'group', 'nam', 'likho', 'ki', 'aapko', 'direct', 'file', 'mil', 'jayegi', 
+            'go', 'profile', 'there', 'link', 'all', 'movies', 'webseries', 'click', 'photo', 
             'bhi', 'hum', 'us', 'yeh', 'woh', 'haan', 'nahi', 'kuch', 'aur', 'kaise', 'kab', 'kyun', 'kaha', 'kon', 'ka', 'bata', 'de', 'bhai', 'be', 'teri', 'to', 'losu', 'chutiya', 'pagal', 'kon', 'aap', 'ka', 'name', 'pta', 'na', 'kiya', 'chak', 'rah', 'chutiya', 'sach', 'bhag', 'are', 'abe', 'yaar', 'oye', 'tum', 'main', 'kya', 'kaise', 'mujhe', 'tera', 'mere', 'sab', 'sirf', 'ek', 'fir', 'hota', 'hoga', 'karoge', 'apna', 'apni', 'apne', 'usse', 'isme', 'kabhi', 'har', 'roz', 'fir', 'kahi'
         ]
 
@@ -160,7 +183,7 @@ async def generate_and_send_group_reply(event):
             if len(word) >= 2 and word not in stop_words_hindi
         ]
         
-        print("Bot will now only use common replies or stickers, not learn from its own past replies.")
+        print("DEBUG: Bot will now only use common replies or stickers, not learn from its own past replies.")
 
         common_replies = [
             "Haa!", "Theek hai!", "Hmm...", "Sahi baat hai!", "Kya chal raha hai?",
@@ -184,7 +207,7 @@ async def generate_and_send_group_reply(event):
     if sticker_list and random.random() < 0.4: 
         sticker_to_send = random.choice(sticker_list)
         reply_text = "" 
-        print(f"Selecting sticker: {sticker_to_send}")
+        print(f"DEBUG: Selecting sticker: '{sticker_to_send}'")
     else:
         emojis_for_text = [
             '😂', '😊', '🥳', '😎', '👍', '✨', '💖', '🥰', '🤣', '😅', '🤗', '🌟', '🌈', '🔥'
@@ -222,21 +245,27 @@ async def generate_and_send_group_reply(event):
 
     sent_message_successfully = False
     if reply_text.strip(): 
-        sent_message = await userbot.send_message(chat_id, reply_text, reply_to=message_id)
-        print(f"Replied with text in {chat_id}: '{reply_text}'")
-        sent_message_successfully = True
+        try:
+            sent_message = await userbot.send_message(chat_id, reply_text, reply_to=message_id)
+            print(f"DEBUG: Replied with text in {chat_id}: '{reply_text}'")
+            sent_message_successfully = True
+        except Exception as e:
+            print(f"ERROR: Failed to send text message in {chat_id}: {e}")
     elif sticker_to_send: 
         try:
             await userbot.send_file(chat_id, sticker_to_send, reply_to=message_id)
-            print(f"Replied with sticker in {chat_id}: '{sticker_to_send}'")
+            print(f"DEBUG: Replied with sticker in {chat_id}: '{sticker_to_send}'")
             sent_message_successfully = True
         except ValueError as ve:
-            print(f"Error sending sticker '{sticker_to_send}': {ve}. Falling back to text reply.")
+            print(f"ERROR: Error sending sticker '{sticker_to_send}': {ve}. Falling back to text reply.")
             fallback_text = "Sorry, main abhi sticker nahi bhej pa rahi. 😊"
-            await userbot.send_message(chat_id, fallback_text, reply_to=message_id)
-            sent_message_successfully = True 
+            try:
+                await userbot.send_message(chat_id, fallback_text, reply_to=message_id)
+                sent_message_successfully = True 
+            except Exception as e:
+                print(f"ERROR: Failed to send fallback text message: {e}")
     else:
-        print(f"No reply generated for message ID {message_id}.")
+        print(f"DEBUG: No reply generated for message ID {message_id}.")
 
     if sent_message_successfully:
         last_reply_timestamp[chat_id] = datetime.utcnow() 
@@ -254,7 +283,7 @@ async def handle_private_message(event):
         return
     
     sender = await event.get_sender()
-    print(f"Received private message from {sender.id}: {event.raw_text}")
+    print(f"DEBUG: Received private message from {sender.id}: {event.raw_text}")
     
     await event.mark_read()
     try:
@@ -262,28 +291,49 @@ async def handle_private_message(event):
         await userbot(SetTypingRequest(peer=input_peer, action=SendMessageTypingAction()))
         await asyncio.sleep(0.5) 
     except Exception as e:
-        print(f"Error sending typing action: {e}")
+        print(f"ERROR: Error sending typing action in private chat: {e}")
 
     reply_to_send = random.choice(PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE) 
-    await event.reply(reply_to_send)
-    print(f"Replied privately to {sender.id} with girl-like funny message.")
+    try:
+        await event.reply(reply_to_send)
+        print(f"DEBUG: Replied privately to {sender.id} with girl-like funny message.")
+    except Exception as e:
+        print(f"ERROR: Failed to reply privately to {sender.id}: {e}")
+
 
 # --- Main function to start userbot ---
 async def start_userbot():
-    print("Starting Userbot function in main.py...")
-    # debug prints for environment variables - temporarily add these
-    print(f"DEBUG: API_ID: {API_ID}, API_HASH length: {len(API_HASH) if API_HASH else 0}, STRING_SESSION length: {len(STRING_SESSION) if STRING_SESSION else 0}, MONGO_URI starts with: {MONGO_URI[:20] if MONGO_URI else 'N/A'}")
+    print("DEBUG: Entering start_userbot function...")
     
-    await userbot.start()
-    print("Userbot started successfully in main.py!")
+    if userbot is None:
+        print("ERROR: Userbot client was not initialized. Exiting.")
+        exit(1)
 
-    # Manage DB size task for the worker
-    asyncio.create_task(manage_db_size())
+    print("DEBUG: Calling userbot.start()...")
+    try:
+        await userbot.start()
+        print("Userbot started successfully in main.py!")
+    except Exception as e:
+        print(f"ERROR: Failed to start Telethon client. Check STRING_SESSION validity or network. Error: {e}")
+        exit(1) # Critical error if bot cannot start
+
+    # Start MongoDB data management task if client_mongo is available
+    if client_mongo:
+        asyncio.create_task(manage_db_size())
+        print("DEBUG: MongoDB data management task scheduled.")
+    else:
+        print("DEBUG: MongoDB client not available, skipping data management task.")
     
-    print("Userbot is running and listening for messages in main.py.")
+    print("DEBUG: Userbot is running and listening for messages in main.py.")
     await userbot.run_until_disconnected()
 
 # --- Run the Userbot ---
+print("DEBUG: Checking if __name__ == '__main__' block is active.")
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_userbot())
+    print("DEBUG: Entering __main__ block to run Userbot.")
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(start_userbot())
+    except Exception as e:
+        print(f"FATAL ERROR: An unhandled exception occurred during event loop execution: {e}")
+    print("--- main.py (Userbot) Script Finished ---")
