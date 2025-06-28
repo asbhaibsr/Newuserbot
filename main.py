@@ -90,7 +90,7 @@ async def manage_db_size():
 async def generate_and_send_group_reply(event):
     incoming_message = event.raw_text
     chat_id = event.chat_id
-    message_id = event.id
+    message_id = event.id # Current message ID
     
     if event.out or (chat_id in last_processed_message_id and last_processed_message_id[chat_id] == message_id):
         return
@@ -134,139 +134,72 @@ async def generate_and_send_group_reply(event):
         'timestamp': datetime.utcnow(),
         'emojis': emojis_in_message,
         'sticker_id': sticker_to_store_id,
-        'is_bot_reply': False # Mark as user message
+        'is_bot_reply': False, # Mark as user message
+        'message_id': message_id # <--- THIS IS THE NEW ADDITION
     })
     print(f"Stored group message from {sender.id} in {chat_id}: '{incoming_message}'")
 
     # --- 2. Reply Generation Logic (Self-learning from stored group data) ---
-    # Keywords extract karein user ke incoming message se
-    words_from_message = [word for word in re.findall(r'\b\w+\b', incoming_message.lower()) if len(word) >= 3 and word not in ['the', 'and', 'is', 'a', 'to', 'in', 'it', 'i', 'of', 'for', 'on', 'with', 'as', 'at', 'this', 'that', 'he', 'she', 'you', 'they', 'we', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'hai', 'kya', 'kar', 'raha', 'ho', 'tum', 'main', 'ko', 'hi', 'mein', 'pr', 'jago', 'wahan', 'movie', 'search', 'group', 'nam', 'likho', 'ki', 'aapko', 'direct', 'file', 'mil', 'jayegi', 'go', 'profile', 'there', 'is', 'a', 'link', 'to', 'all', 'the', 'movies', 'and', 'webseries', 'click', 'photo']]
-    
-    if words_from_message:
-        regex_pattern = f"({'|'.join(re.escape(w) for w in words_from_message)})"
+    # Handle "Searching For..." messages first
+    if "searching for" in incoming_message.lower():
+        print(f"Detected 'Searching For' message: '{incoming_message}'. Providing generic reply.")
+        common_replies = [
+            "Haa! 😄", "Theek hai! 👍", "Hmm...🤔", "Sahi baat hai! ✅", "Kya chal raha hai? 👀",
+            "Accha! ✨", "Samajh gayi! 😉", "Bilkul! 👍", "Baat kar! 🗣️", "Good! 😊",
+            "Aur batao? 👇", "Masti chal rahi hai! 😂", "Kuch naya? 🤩", "Wah! 🥳", "Kya kehna! 😲",
+            "Hehe! 😊", "Ek number! 👌", "Awesome! ✨", "Nice! 😄", "Super! 💖", " "
+        ]
+        reply_text = random.choice(common_replies) # Always use generic for these
+        emojis_to_send = random.choice([['👍'], ['😁'], ['😂']])
+    else:
+        # Normal message processing for self-learning
+        # Build regex from user's keywords (after filtering stop words and short words)
+        keywords_for_search = [word for word in re.findall(r'\b\w+\b', incoming_message.lower()) if len(word) >= 3 and word not in ['the', 'and', 'is', 'a', 'to', 'in', 'it', 'i', 'of', 'for', 'on', 'with', 'as', 'at', 'this', 'that', 'he', 'she', 'you', 'they', 'we', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'hai', 'kya', 'kar', 'raha', 'ho', 'tum', 'main', 'ko', 'hi', 'mein', 'pr', 'jago', 'wahan', 'movie', 'search', 'group', 'nam', 'likho', 'ki', 'aapko', 'direct', 'file', 'mil', 'jayegi', 'go', 'profile', 'there', 'is', 'a', 'link', 'to', 'all', 'the', 'movies', 'and', 'webseries', 'click', 'photo', 'for', 'a', 'theek', 'baat', 'sahi']] # Added more stop words
         
-        search_query = {
-            "chat_id": chat_id,
-            "is_bot_reply": False, # Ab hum user ke past messages mein search karenge
-            "message": {"$regex": regex_pattern, "$options": "i"} # User ke message content mein search
-        }
-        
-        # Pichle user message ko dhoondho jo bot ke reply ke liye context de sake
-        # Fir us message se associated bot ka reply dhoondho
-        
-        # User ke relevant message ko dhundho
-        relevant_user_message = messages_collection.find_one(search_query, sort=[("timestamp", -1)])
-
-        if relevant_user_message:
-            # Agar user ka relevant message mil gaya, toh uske baad ka bot ka reply dhoondho
-            bot_reply_query = {
+        if keywords_for_search:
+            # Look for past bot replies whose 'original_message' (the user's input at that time)
+            # matches the current keywords.
+            search_query_for_past_bot_reply = {
                 "chat_id": chat_id,
                 "is_bot_reply": True,
-                "original_message_id": relevant_user_message['message_id'] # Yeh field aapke current DB schema mein nahi hai, isko use nahi kar sakte
-                                                                            # Instead, us user message ke theek baad ka bot reply search karenge
+                "original_message": {"$regex": f"({'|'.join(re.escape(w) for w in keywords_for_search)})", "$options": "i"} 
             }
-            # Instead of original_message_id, which might not be set correctly for older entries,
-            # we'll find bot's replies *after* a specific user message. This is more complex.
-            # A simpler approach: if a user message has a stored 'reply_text', use that.
             
-            # LET'S REFINES THIS LOGIC:
-            # Instead of searching for bot's previous replies based on the 'original_message' field,
-            # which became confusing (as it stored user messages),
-            # let's modify the document structure slightly to store user message and bot reply as a PAIR.
-            # For now, let's just make sure we are searching for a USER's message
-            # and trying to find a *corresponding* bot reply.
-            
-            # Refined search: Find a past user message that contains the keywords.
-            # Then, see if there's a bot reply that immediately followed it.
-            # This is hard with your current schema.
+            past_bot_reply_doc = messages_collection.find_one(search_query_for_past_bot_reply, sort=[("reply_timestamp", -1)])
 
-            # SIMPLER APPROACH FOR 1.28.0 (given constraints):
-            # We need to search for an *already stored bot reply* that was given to a *similar user input*.
-            # The current `original_message` field in `is_bot_reply: True` documents is problematic
-            # because it stores the *user's message*.
-
-            # Let's adjust the `original_message` field in the bot's reply document
-            # to be specifically the *keywords* from the user's message, not the full message.
-            # And refine the search.
-            
-            # For now, let's simplify: find any past *bot reply* (is_bot_reply: True)
-            # whose `reply_text` contains keywords from the *current* user message.
-            # This creates a loop: bot repeats what it said if it matches.
-            
-            # The *current* logic of finding `past_bot_reply` is trying to find a bot's *previous reply*
-            # whose `original_message` field (which stores the user's message) matches the new incoming message.
-            # This is actually the correct *intent* for self-learning.
-            # The problem is that the `original_message` field in bot replies is being populated
-            # with messages like "Searching for Sahi baat hai!", which are not what we want to learn from.
-
-            # The `original_message` field in the bot's reply document is meant to store the *user's message*
-            # that triggered this specific bot reply. This is crucial for context.
-
-            # Let's ensure the `original_message` stored in the bot's reply entry is indeed the *user's message*
-            # that it's replying to.
-
-            # Let's clean up the regex for `original_message` and `reply_text`
-            # and remove the problematic 'Searching For' from keywords if it originates from an external bot.
-
-            # REVISED REPLY GENERATION LOGIC:
-            # First, check if the incoming message is one of those "Searching For..." messages.
-            # If yes, skip learning from it and just give a generic reply if needed.
-            # Otherwise, proceed with learning.
-            
-            # Handle "Searching For..." messages first
-            if "searching for" in incoming_message.lower():
-                print(f"Detected 'Searching For' message: '{incoming_message}'. Providing generic reply.")
-                reply_text = random.choice(common_replies) # Always use generic for these
-                emojis_to_send = random.choice([['👍'], ['😁'], ['😂']])
+            if past_bot_reply_doc and 'reply_text' in past_bot_reply_doc:
+                reply_text = past_bot_reply_doc['reply_text']
+                emojis_to_send = past_bot_reply_doc.get('emojis', []) # Use emojis from the past reply
+                sticker_to_send = past_bot_reply_doc.get('sticker_id', None)
+                print(f"Found existing reply from DB: '{reply_text}' based on keywords: {keywords_for_search}")
             else:
-                # Normal message processing for self-learning
-                # Build regex from user's keywords (after filtering stop words and short words)
-                keywords_for_search = [word for word in re.findall(r'\b\w+\b', incoming_message.lower()) if len(word) >= 3 and word not in ['the', 'and', 'is', 'a', 'to', 'in', 'it', 'i', 'of', 'for', 'on', 'with', 'as', 'at', 'this', 'that', 'he', 'she', 'you', 'they', 'we', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'hai', 'kya', 'kar', 'raha', 'ho', 'tum', 'main', 'ko', 'hi', 'mein', 'pr', 'jago', 'wahan', 'movie', 'search', 'group', 'nam', 'likho', 'ki', 'aapko', 'direct', 'file', 'mil', 'jayegi', 'go', 'profile', 'there', 'is', 'a', 'link', 'to', 'all', 'the', 'movies', 'and', 'webseries', 'click', 'photo', 'for', 'a', 'theek', 'baat', 'sahi']] # Added more stop words
-                
-                if keywords_for_search:
-                    # Look for past bot replies whose 'original_message' (the user's input at that time)
-                    # matches the current keywords.
-                    search_query_for_past_bot_reply = {
-                        "chat_id": chat_id,
-                        "is_bot_reply": True,
-                        "original_message": {"$regex": f"({'|'.join(re.escape(w) for w in keywords_for_search)})", "$options": "i"} 
-                    }
-                    
-                    past_bot_reply_doc = messages_collection.find_one(search_query_for_past_bot_reply, sort=[("reply_timestamp", -1)])
+                print(f"No relevant past bot reply found for keywords: {keywords_for_search}. Using common replies.")
+        else:
+            print("No meaningful keywords extracted from message. Using common replies.")
 
-                    if past_bot_reply_doc and 'reply_text' in past_bot_reply_doc:
-                        reply_text = past_bot_reply_doc['reply_text']
-                        emojis_to_send = past_bot_reply_doc.get('emojis', []) # Use emojis from the past reply
-                        sticker_to_send = past_bot_reply_doc.get('sticker_id', None)
-                        print(f"Found existing reply from DB: '{reply_text}' based on keywords: {keywords_for_search}")
-                    else:
-                        print(f"No relevant past bot reply found for keywords: {keywords_for_search}. Using common replies.")
-                else:
-                    print("No meaningful keywords extracted from message. Using common replies.")
+        if not reply_text: # Agar koi relevant reply nahi mila ya keywords nahi the
+            common_replies = [
+                "Haa! 😄", "Theek hai! 👍", "Hmm...🤔", "Sahi baat hai! ✅", "Kya chal raha hai? 👀",
+                "Accha! ✨", "Samajh gayi! 😉", "Bilkul! 👍", "Baat kar! 🗣️", "Good! 😊",
+                "Aur batao? 👇", "Masti chal rahi hai! 😂", "Kuch naya? 🤩", "Wah! 🥳", "Kya kehna! 😲",
+                "Hehe! 😊", "Ek number! 👌", "Awesome! ✨", "Nice! 😄", "Super! 💖", " "
+            ]
+            reply_text = random.choice(common_replies)
+            
+            if not reply_text.strip():
+                emojis_to_send = random.choice([['👍'], ['😁'], ['😂'], ['🥳'], ['😎'], ['💖'], ['🥰'], ['✨']])
+            elif random.random() < 0.6:
+                emojis_to_send.append(random.choice(['😂', '😊', '🥳', '😎', '👍', '✨', '💖', '🥰']))
 
-                if not reply_text: # Agar koi relevant reply nahi mila ya keywords nahi the
-                    common_replies = [
-                        "Haa! 😄", "Theek hai! 👍", "Hmm...🤔", "Sahi baat hai! ✅", "Kya chal raha hai? 👀",
-                        "Accha! ✨", "Samajh gayi! 😉", "Bilkul! 👍", "Baat kar! 🗣️", "Good! 😊",
-                        "Aur batao? 👇", "Masti chal rahi hai! 😂", "Kuch naya? 🤩", "Wah! 🥳", "Kya kehna! 😲",
-                        "Hehe! 😊", "Ek number! 👌", "Awesome! ✨", "Nice! 😄", "Super! 💖", " "
-                    ]
-                    reply_text = random.choice(common_replies)
-                    
-                    if not reply_text.strip():
-                        emojis_to_send = random.choice([['👍'], ['😁'], ['😂'], ['🥳'], ['😎'], ['💖'], ['🥰'], ['✨']])
-                    elif random.random() < 0.6:
-                        emojis_to_send.append(random.choice(['😂', '😊', '🥳', '😎', '👍', '✨', '💖', '🥰']))
+            sticker_list = [ # !!! Yahan apne girl-like stickers ki actual IDs daalein !!!
+                # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE",
+                # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE"
+            ]
+            if not reply_text.strip() and sticker_list and random.random() < 0.7:
+                sticker_to_send = random.choice(sticker_list)
+                emojis_to_send = []
 
-                    sticker_list = [ # !!! Yahan apne girl-like stickers ki actual IDs daalein !!!
-                        # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE",
-                        # "CAACAgIAAxkBAAEFfBpmO...Fh18EAAH-xX8AAWJ2XAAE"
-                    ]
-                    if not reply_text.strip() and sticker_list and random.random() < 0.7:
-                        sticker_to_send = random.choice(sticker_list)
-                        emojis_to_send = []
-
-                    print(f"Using fallback reply: '{reply_text}' or sticker: '{sticker_to_send}'")
+            print(f"Using fallback reply: '{reply_text}' or sticker: '{sticker_to_send}'")
 
     # --- 3. Word count control (1-8 words) ---
     if reply_text:
@@ -288,7 +221,7 @@ async def generate_and_send_group_reply(event):
 
     # --- Reply send karna ---
     if reply_text or sticker_to_send:
-        final_reply_text = reply_text + "".join(emojis_to_send) if reply_text else "".join(emojis_to_send) # Emojis ko sirf ek baar add karein
+        final_reply_text = reply_text + "".join(emojis_to_send) if reply_text else "".join(emojis_to_send)
         
         sent_message = None
         if final_reply_text.strip():
