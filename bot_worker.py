@@ -32,7 +32,7 @@ try:
     print("MongoDB connection successful for bot_worker.")
 except Exception as e:
     print(f"MongoDB connection failed for bot_worker: {e}")
-    exit()
+    # exit()
 
 # --- Telethon Client Setup ---
 userbot = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
