@@ -1,0 +1,5 @@
+telethon
+pymongo
+flask
+dnspython # PyMongo ke liye aksar zaroori hota hai
+gunicorn # Koyeb par web server chalane ke liye
