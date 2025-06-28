@@ -3,7 +3,7 @@ import asyncio
 import re
 import random
 from telethon.sync import TelegramClient, events
-from telethon.tl.types import SendMessageTypingAction # Yeh abhi bhi chahiye action type ke liye
+from telethon.tl.types import SendMessageTypingAction
 from telethon.sessions import StringSession
 from pymongo import MongoClient
 from datetime import datetime, timedelta
@@ -27,8 +27,8 @@ PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE = [
 # --- MongoDB Setup ---
 try:
     client_mongo = MongoClient(MONGO_URI)
-    db = client_mongo['telegram_userbot_db'] # Aap database ka naam badal sakte hain
-    messages_collection = db['group_messages'] # Collection jahan group messages store honge
+    db = client_mongo['telegram_userbot_db']
+    messages_collection = db['group_messages']
     print("MongoDB connection successful.")
 except Exception as e:
     print(f"MongoDB connection failed: {e}")
@@ -62,7 +62,7 @@ async def manage_db_size():
     DELETE_PERCENTAGE = 0.50 
 
     while True:
-        await asyncio.sleep(3600) # Har ghante check karega (1 hour = 3600 seconds)
+        await asyncio.sleep(3600)
         try:
             total_messages = await messages_collection.count_documents({})
             print(f"Current DB size: {total_messages} messages.")
@@ -102,9 +102,9 @@ async def generate_and_send_group_reply(event):
 
     # --- Typing status dikhana aur 0.5 second ka delay ---
     await event.mark_read()
-    # `userbot.send_action` ki jagah `userbot.action` ka istemal
-    await userbot.action(chat_id, SendMessageTypingAction()) 
-    await asyncio.sleep(0.5)
+    # `userbot.action` ki jagah `userbot.typing()` context manager ka istemal
+    async with userbot.typing(chat_id): # This will automatically handle typing action
+        await asyncio.sleep(0.5) # Minimum 0.5 second ka delay
 
     reply_text = None
     sticker_to_send = None
@@ -234,9 +234,9 @@ async def handle_private_message(event):
     print(f"Received private message from {sender.id}: {event.raw_text}")
     
     await event.mark_read()
-    # `userbot.send_action` ki jagah `userbot.action` ka istemal
-    await userbot.action(event.chat_id, SendMessageTypingAction())
-    await asyncio.sleep(0.5)
+    # `userbot.action` ki jagah `userbot.typing()` context manager ka istemal
+    async with userbot.typing(event.chat_id):
+        await asyncio.sleep(0.5)
 
     reply_to_send = random.choice(PRIVATE_REPLY_TEXT_FUNNY_GIRL_LIKE)
     await event.reply(reply_to_send)
